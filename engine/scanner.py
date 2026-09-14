@@ -16,7 +16,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from data.tv_data import get_df, load_cached
+from data.tv_data import get_df
 from engine.risk import RiskManager, format_decimal
 from strategy import candidates, indicators as ind
 from strategy.profiles import SYMBOL_RUNTIME, profile_for
@@ -174,8 +174,8 @@ class FVGScanner:
         the current HTF bias. Bull-bias => long zones, bear-bias => short zones.
         Used for the "watch zone" pre-alert sent before a retest confirms.
         """
-        df = load_cached(symbol, entry_tf)
-        if len(df) < 60:
+        df = get_df(symbol, entry_tf, refresh=False)
+        if df is None or len(df) < 60:
             return []
         sub = df.iloc[-lookback:].copy()
         bias = self.current_bias(symbol, entry_tf, bias_htf)

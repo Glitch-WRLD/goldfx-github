@@ -33,7 +33,11 @@ def _cache_path(symbol: str, tf: str) -> Path:
 def load_cached(symbol: str, tf: str) -> pd.DataFrame | None:
     p = _cache_path(symbol, tf)
     if p.exists():
-        df = pd.read_parquet(p)
+        try:
+            df = pd.read_parquet(p)
+        except Exception:
+            # engine missing (no pyarrow/fastparquet on lean runners) or corrupt cache
+            return None
         for col in ("time", "index", "Time"):
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], utc=True)
@@ -48,7 +52,11 @@ def save_cached(symbol: str, tf: str, df: pd.DataFrame) -> None:
     out = df.copy()
     out.index = pd.to_datetime(out.index, utc=True)
     out.index.name = "time"
-    out.reset_index().to_parquet(_cache_path(symbol, tf), index=False)
+    try:
+        out.reset_index().to_parquet(_cache_path(symbol, tf), index=False)
+    except Exception:
+        # no parquet engine available (lean runner): skip caching, fetch-only
+        pass
 
 
 async def fetch_bars(symbol: str, tf: str, bars: int = 40000) -> pd.DataFrame:
