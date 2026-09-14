@@ -1,0 +1,51 @@
+name: goldfx-scan
+
+on:
+  schedule:
+    # default cadence. NOTE: this cadence is sustainable ONLY on a public repo
+    # (public repos get UNLIMITED Actions minutes). For a private repo change to
+    # e.g. '0 * * * *' (hourly) to stay inside the 2,000-min free budget.
+    - cron: '*/15 * * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: goldfx-scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python with pip cache
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install deps
+        run: pip install -r requirements-gha.txt
+
+      - name: Scan + deliver
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python scripts/gha_scan.py
+
+      - name: Commit state back to the repo
+        run: |
+          git config user.name "goldfx-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add gha_state/
+          if ! git diff --cached --quiet; then
+            git commit -m "state: $(date -u +%FT%TZ)"
+            git push
+          else
+            echo "no state change - nothing to commit"
+          fi

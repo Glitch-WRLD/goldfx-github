@@ -1,0 +1,16 @@
+[Unit]
+Description=GoldFX Telegram signal bot (FVG scanner + alerts)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__PROJDIR__
+ExecStart=__VENVPY__ scripts/run_bot.py
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

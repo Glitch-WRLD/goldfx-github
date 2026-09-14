@@ -1,0 +1,19 @@
+# secrets - never commit
+.env
+
+# python
+.venv/
+__pycache__/
+*.pyc
+
+# local runtime artifacts (local bot state; GHA keeps its state in gha_state/)
+bot.log
+bot_state.json
+
+# heavy / regenerable data
+data_cache/
+reports/*.json
+reports/*.md
+
+# misc
+.DS_Store

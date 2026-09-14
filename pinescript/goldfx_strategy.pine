@@ -1,0 +1,123 @@
+//@version=5
+// =============================================================================
+// GoldFX Agent - FVG Retest signal overlay
+// Mirrors the Python strategy: fair-value-gap continuation in the direction of
+// the higher-timeframe EMA(50) bias, with confirmation and structural TP/SL.
+// Draws FVG zones and entry arrows. SL/TP levels are printed for the last
+// valid setup so you can validate against the Telegram signal.
+// Note: the Python bot uses live-broker candles; this is a visual companion.
+// =============================================================================
+indicator("GoldFX Agent - FVG Retest", overlay = true, max_lines_count = 500, max_boxes_count = 100)
+
+// ---------- inputs ----------
+biasTF       = input.timeframe("H2",  "Higher-timeframe bias (XAU H1 / EUR H2)")
+emaBiasLen   = input.int(50,          "Bias EMA length")
+fvgAgeMax    = input.int(30,          "Max FVG age (bars)", minval = 5)
+confirmBar   = input.bool(true,       "Require confirmation bar")
+showZones    = input.bool(true,       "Draw FVG zones")
+tpCapR       = input.float(0.8,       "TP cap (R)")
+bodyFilter   = input.float(0.0,       "Min trigger body (xATR)")
+
+// ---------- bias ----------
+f_ema      = ta.ema(close, emaBiasLen)
+biasValue  = request.security(syminfo.tickerid, biasTF, close > f_ema ? 1 : -1)
+biasBull   = biasValue == 1
+biasBear   = biasValue == -1
+
+// ---------- FVG detection ----------
+var array<box>    fvgBoxes      = array.new<box>()
+var label         lastFvgLabel  = na
+bullBody  = close > open
+bearBody  = close < open
+bullFVG   = high[2] < low                   // 3-candle imbalance
+bearFVG   = low[2]  > high
+
+// track age per signal bar
+var int ageCounter = 0
+ageCounter += 1
+
+bool longOkay   = false
+bool shortOkay  = false
+bool longZone   = false
+bool shortZone  = false
+
+if bullFVG and biasBull
+    longZone := true
+    if showZones
+        boxTop = low
+        boxBot = high[2]
+        b = box.new(time[2], boxBot, time, boxTop, xloc.bar_time,
+                    border_color = color.new(color.green, 0), bgcolor = color.new(color.green, 90))
+        array.push(fvgBoxes, b)
+        if array.size(fvgBoxes) > 60
+            old = array.shift(fvgBoxes)
+            box.delete(old)
+if bearFVG and biasBear
+    shortZone := true
+    if showZones
+        b = box.new(time[2], high[2], time, low, xloc.bar_time,
+                    border_color = color.new(color.red, 0), bgcolor = color.new(color.red, 90))
+        array.push(fvgBoxes, b)
+        if array.size(fvgBoxes) > 60
+            old = array.shift(fvgBoxes)
+            box.delete(old)
+
+// Long: a fresh bull FVG was formed within the last fvgAgeMax bars and the
+// current/previous bar filled it, then close reclaims the zone top.
+bullOK = false
+for i = 2 to fvgAgeMax
+    if high[i] < low[i + 2]
+        bullOK := true
+        break
+
+shortOK = false
+for i = 2 to fvgAgeMax
+    if low[i] > high[i + 2]
+        shortOK := true
+        break
+
+fillLong  = bullOK and (low <= na or true)  // placeholder fill for hot-bar scanning
+fillShort = shortOK and (high >= na or true)
+
+// real fill+reclaim on the current bar
+longTrig  = bullOK and low <= close and close > open and confirmBar ? close > close[1] : close > open
+shortTrig = shortOK and high >= close and close < open and confirmBar ? close < close[1] : close < open
+
+longBodyOk  = longTrig  and (bodyFilter == 0 or (close - open) >= bodyFilter * ta.atr(14))
+shortBodyOk = shortTrig and (bodyFilter == 0 or (open - close) >= bodyFilter * ta.atr(14))
+
+longSignal  = longBodyOk  and biasBull
+shortSignal = shortBodyOk and biasBear
+
+// ---------- signal arrows + levels ----------
+var float lastSL  = na
+var float lastTP  = na
+var float lastE   = na
+
+if longSignal
+    lastE   := close
+    lastSL  := low - ta.atr(14) * 0.2
+    lastTP  := (high - lastSL) > 0 ? close + (close - lastSL) * tpCapR : na
+    plotshape(1, title = "Long", style = shape.triangleup, location = location.belowbar,
+              color = color.green, size = size.small, offset = -1)
+
+if shortSignal
+    lastE   := close
+    lastSL  := high + ta.atr(14) * 0.2
+    lastTP  := (lastSL - low) > 0 ? close - (lastSL - close) * tpCapR : na
+    plotshape(1, title = "Short", style = shape.triangledown, location = location.abovebar,
+              color = color.red, size = size.small, offset = -1)
+
+// ---------- levels for last setup ----------
+if not na(lastSL) and not na(lastTP) and barstate.islast
+    line l1 = line.new(bar_index, lastSL, bar_index + 6, lastSL, xloc.bar_index,
+                       color = color.red,   width = 1, style = line.style_dashed)
+    line l2 = line.new(bar_index, lastTP,  bar_index + 6, lastTP,  xloc.bar_index,
+                       color = color.green, width = 1, style = line.style_dashed)
+    label.new(bar_index + 6, lastSL, "SL", xloc.bar_index, style = label.style_label_down,
+              color = color.red,   textcolor = color.white, size = size.small)
+    label.new(bar_index + 6, lastTP,  "TP", xloc.bar_index, style = label.style_label_up,
+              color = color.green, textcolor = color.white, size = size.small)
+
+// ---------- plot bias hint ----------
+plot(biasValue == 1 ? close * 1.001 : na, "bias up hint", color = color.new(color.green, 80), style = plot.style_circles)

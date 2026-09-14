@@ -1,0 +1,6 @@
+tradingview-sdk[pandas]
+python-telegram-bot[job-queue]
+python-dotenv
+pandas
+numpy
+pyarrow
