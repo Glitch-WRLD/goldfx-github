@@ -10,13 +10,13 @@ HI_PROFILE = {
     "label": "High Win-Rate (~57%)",
     "params": {
         "atr_len": 14, "fvg_lookback": 3, "fvg_max_age": 30, "min_gap": 4,
-        "tp_r": 1.0, "bias_htf": "H1", "bias_ema": 50, "long_only": True,
+        "tp_r": 1.0, "bias_htf": "H1", "bias_ema": 50, "long_only": False,
         "bias_htf_by_pair": True, "eur_bias_htf": "H2", "smart_tp": True,
         "min_rr": 0.5, "max_rr": 0.8, "tp_lookback": 60, "confirm": True,
         "min_body_atr": 0.0,
     },
-    "backtest": {"n": 1947, "win_rate": 0.577, "profit_factor": 1.36,
-                 "total_r": 299.0, "exp_rpermonth": 14.2},
+    "backtest": {"n": 1073, "win_rate": 0.566, "profit_factor": 1.30,
+                 "total_r": 141.0, "exp_rpermonth": 6.7},
 }
 
 BAL_PROFILE = {
@@ -24,13 +24,13 @@ BAL_PROFILE = {
     "label": "Balanced (PF ~1.5)",
     "params": {
         "atr_len": 14, "fvg_lookback": 3, "fvg_max_age": 30, "min_gap": 4,
-        "tp_r": 1.5, "bias_htf": "H1", "bias_ema": 50, "long_only": True,
+        "tp_r": 1.5, "bias_htf": "H1", "bias_ema": 50, "long_only": False,
         "bias_htf_by_pair": True, "eur_bias_htf": "H2", "smart_tp": True,
         "min_rr": 0.7, "max_rr": 1.4, "tp_lookback": 60, "confirm": False,
         "min_body_atr": 0.0,
     },
-    "backtest": {"n": 2957, "win_rate": 0.496, "profit_factor": 1.48,
-                 "total_r": 710.5, "exp_rpermonth": 33.8},
+    "backtest": {"n": 1654, "win_rate": 0.475, "profit_factor": 1.36,
+                 "total_r": 309.1, "exp_rpermonth": 14.7},
 }
 
 # Per-symbol live settings: entry timeframe + higher-TF bias source.

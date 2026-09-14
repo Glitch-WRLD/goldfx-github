@@ -167,8 +167,8 @@ class FVGScanner:
 
     def scan_new_zones(self, symbol: str, entry_tf: str, bias_htf: str,
                        lookback: int = 40) -> list[ZoneAlert]:
-        """Detect FVG zones formed on the most recent CLOSED bars and aligned
-        with the current HTF bias (long-only strategy: bullish zones only).
+        """Detect FVG zones formed on the most recent CLOSED bars, aligned with
+        the current HTF bias. Bull-bias => long zones, bear-bias => short zones.
         Used for the "watch zone" pre-alert sent before a retest confirms.
         """
         df = load_cached(symbol, entry_tf)
@@ -176,18 +176,21 @@ class FVGScanner:
             return []
         sub = df.iloc[-lookback:].copy()
         bias = self.current_bias(symbol, entry_tf, bias_htf)
-        if bias != 1:
-            return []
         H, L = sub["high"], sub["low"]
         n = len(sub)
         last = n - 2  # last fully closed bar
         out: list[ZoneAlert] = []
         for i in range(max(2, last - 1), last + 1):
-            if H.iloc[i - 2] < L.iloc[i]:
+            if bias == 1 and H.iloc[i - 2] < L.iloc[i]:
                 bot, top = float(H.iloc[i - 2]), float(L.iloc[i])
                 out.append(ZoneAlert(symbol=symbol, ts=sub.index[i],
                                      bottom=bot, top=top,
-                                     bias_htf=bias_htf, bias=bias))
+                                     bias_htf=bias_htf, bias=1))
+            elif bias == -1 and L.iloc[i - 2] > H.iloc[i]:
+                bot, top = float(H.iloc[i]), float(L.iloc[i - 2])
+                out.append(ZoneAlert(symbol=symbol, ts=sub.index[i],
+                                     bottom=bot, top=top,
+                                     bias_htf=bias_htf, bias=-1))
         return out
 
     def scan_symbol(self, symbol: str, entry_tf: str | None = None,

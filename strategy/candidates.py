@@ -162,27 +162,33 @@ def _ema_pullback(df: pd.DataFrame, p: dict) -> list[Signal]:
 
 
 def _fvg_retest(df: pd.DataFrame, p: dict) -> list[Signal]:
-    """Fair-value-gap continuation with HTF-bias alignment."""
+    """Fair-value-gap continuation with HTF-bias alignment.
+
+    ``long_only=True``: longs only (bullish bias). ``long_only=False``:
+    BOTH directions - longs on bullish bias and shorts on bearish bias.
+    """
     from strategy.filters import fvg_retest_signal
     c = df["close"]
     atr = ind.atr(df, p["atr_len"])
     bias = _bias_for(df, p)
 
     sigs: list[Signal] = []
-    keep = (bias > 0).values
-    # build an aligned low-TF frame for the FVG scanner
-    df_m = df.copy()
-    if p.get("long_only", True):
-        df_m.loc[bias <= 0, ["high", "low", "close", "open"]] = np.nan
-        res = fvg_retest_signal(df_m, p, +1, atr, c, df.index, p["min_gap"], 4000)
-        for ts, sl, reason in res:
-            i = df.index.get_loc(ts)
-            tp_price = _smart_tp_price(df, i, +1, p.get("tp_lookback", 60)) if p.get("smart_tp") else None
-            sigs.append(Signal(ts, +1, sl, p["tp_r"], reason, tp_price))
-    if not p.get("long_only", True):
-        df_m2 = df.copy()
-        df_m2.loc[bias >= 0, ["high", "low", "close", "open"]] = np.nan
-        res = fvg_retest_signal(df_m2, p, -1, atr, c, df.index, p["min_gap"], 2000)
+    long_only = bool(p.get("long_only", True))
+
+    # longs: FVG retests only while HTF bias is bullish
+    df_l = df.copy()
+    df_l.loc[bias <= 0, ["high", "low", "close", "open"]] = np.nan
+    res = fvg_retest_signal(df_l, p, +1, atr, c, df.index, p["min_gap"], 4000)
+    for ts, sl, reason in res:
+        i = df.index.get_loc(ts)
+        tp_price = _smart_tp_price(df, i, +1, p.get("tp_lookback", 60)) if p.get("smart_tp") else None
+        sigs.append(Signal(ts, +1, sl, p["tp_r"], reason, tp_price))
+
+    # shorts: FVG retests only while HTF bias is bearish
+    if not long_only:
+        df_s = df.copy()
+        df_s.loc[bias >= 0, ["high", "low", "close", "open"]] = np.nan
+        res = fvg_retest_signal(df_s, p, -1, atr, c, df.index, p["min_gap"], 2000)
         for ts, sl, reason in res:
             i = df.index.get_loc(ts)
             tp_price = _smart_tp_price(df, i, -1, p.get("tp_lookback", 60)) if p.get("smart_tp") else None
