@@ -120,6 +120,40 @@ scripts/                  backtest, validation, report, bot, rsync_to_pi, deploy
 reports/                  sweep_results.json, final_validation.json, COMPARISON.md
 ```
 
+## Free 24/7 hosting via GitHub Actions (no server, no card)
+
+The project ships a scheduler runner (`.github/workflows/scanner.yml` +
+`scripts/gha_scan.py`) that re-scans on a cron and drops signals to Telegram —
+for free, forever, with no VM. Key points:
+
+- **Public repo = unlimited Actions minutes** (private repos cap at 2,000
+  min/month, which would force an hourly cadence). No secrets live in the repo:
+  `BOT_TOKEN` / `CHAT_ID` go in *repository secrets*.
+- Each tick: fetch last candles from TradingView → re-scan a trailing window of
+  closed bars (catch-up: bars between ticks are delivered late, never missed) →
+  send new signals → process `/commands` via `getUpdates` (replies lag up to one
+  interval) → autocommit `gha_state/state.json` so the next tick continues.
+
+**Setup (one-time):**
+
+1. Create a public repo (e.g. `goldfx-agent`) on github.com, then push:
+   ```bash
+   cd goldfx-agent
+   git remote add origin git@github.com:<YOUR_USER>/goldfx-agent.git
+   git push -u origin main
+   ```
+   (Add the `goldfx-github` SSH key at github.com/settings/keys first.)
+2. Repo → Settings → Secrets and variables → Actions → **New repository secret**:
+   - `BOT_TOKEN` = your bot token
+   - `CHAT_ID` = `-1004489143176`
+3. **Stop this machine's local bot** so two processes don't poll the same token
+   (`kill <pid>` / see `bot.log`).
+4. Actions tab → `goldfx-scan` → Run workflow (first run), then it runs every
+   15 min automatically.
+
+Monitor ticks in the Actions tab; debug with `python scripts/gha_scan.py --no-updates`
+locally (reads `.env`, doesn't touch `getUpdates`).
+
 ## Disclaimer
 
 Educational research with backtest-tested but *not* live-tested performance.
