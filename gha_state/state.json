@@ -1,6 +1,80 @@
 {
- "delivered": [],
- "history": [],
+ "delivered": [
+  "EURUSD:2026-09-14T03:00:00+00:00",
+  "EURUSD:2026-09-14T13:00:00+00:00",
+  "XAUUSD:2026-09-14T06:30:00+00:00",
+  "XAUUSD:2026-09-14T08:00:00+00:00",
+  "XAUUSD:2026-09-14T12:00:00+00:00",
+  "XAUUSD:2026-09-14T14:00:00+00:00"
+ ],
+ "history": [
+  {
+   "dir": "SHORT",
+   "entry": 4270.205,
+   "profile": "high_winrate",
+   "rr": 1.03,
+   "sl": 4286.268800174925,
+   "symbol": "XAUUSD",
+   "tf": "M30",
+   "tp": 4253.635,
+   "ts": "2026-09-14T14:00:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 1.15254,
+   "profile": "high_winrate",
+   "rr": 0.8,
+   "sl": 1.155291351727009,
+   "symbol": "EURUSD",
+   "tf": "H1",
+   "tp": 1.1503389186183928,
+   "ts": "2026-09-14T13:00:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 4286.14,
+   "profile": "high_winrate",
+   "rr": 0.4,
+   "sl": 4305.935061010465,
+   "symbol": "XAUUSD",
+   "tf": "M30",
+   "tp": 4278.3,
+   "ts": "2026-09-14T12:00:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 4310.755,
+   "profile": "high_winrate",
+   "rr": 1.0,
+   "sl": 4329.405049515114,
+   "symbol": "XAUUSD",
+   "tf": "M30",
+   "tp": 4292.11,
+   "ts": "2026-09-14T08:00:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 4322.32,
+   "profile": "high_winrate",
+   "rr": 1.06,
+   "sl": 4350.843738220061,
+   "symbol": "XAUUSD",
+   "tf": "M30",
+   "tp": 4292.11,
+   "ts": "2026-09-14T06:30:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 1.15705,
+   "profile": "high_winrate",
+   "rr": 0.06,
+   "sl": 1.1591321130480308,
+   "symbol": "EURUSD",
+   "tf": "H1",
+   "tp": 1.15692,
+   "ts": "2026-09-14T03:00:00+00:00"
+  }
+ ],
  "offset": 821843586,
  "profile": "hi",
  "zones": []
