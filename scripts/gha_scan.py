@@ -87,7 +87,7 @@ def load_state() -> dict:
             return json.loads(STATE_FILE.read_text())
         except Exception as e:
             log.warning("state unreadable (%s); starting fresh", e)
-    return {"offset": 0, "profile": "hi", "delivered": [], "zones": [], "history": []}
+    return {"offset": 0, "profile": "balanced", "delivered": [], "zones": [], "history": []}
 
 
 def save_state(s: dict) -> None:
@@ -164,7 +164,7 @@ def scan_and_deliver(state: dict) -> None:
     if not TOKEN or not CHAT_ID:
         log.error("BOT_TOKEN / CHAT_ID not set")
         return
-    sc = FVGScanner(state.get("profile", "hi"))
+    sc = FVGScanner(state.get("profile", "balanced"))
     delivered = set(state.get("delivered", []))
     advised_zones = set(state.get("zones", []))
     sent_this_tick = 0

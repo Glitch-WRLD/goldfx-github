@@ -165,6 +165,14 @@ def run_backtest(df: pd.DataFrame, symbol: str, tf: str, strategy: str,
             elif rr > max_rr:
                 tp = entry + side * risk * max_rr
 
+        # degenerate-signal filter: drop trades whose resolved RR is too small
+        # to be worth the 1R exposure (fragile after spread + slippage).
+        min_rr_post = params.get("min_rr_post", 0.0)
+        if min_rr_post > 0:
+            resolved_rr = side * (tp - entry) / risk
+            if resolved_rr < min_rr_post:
+                continue
+
         exit_ts = None
         exit_price = None
         r = 0.0

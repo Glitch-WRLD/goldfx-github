@@ -57,7 +57,7 @@ class ZoneAlert:
 
 
 class FVGScanner:
-    def __init__(self, profile_name: str = "hi"):
+    def __init__(self, profile_name: str = "balanced"):
         self.profile = profile_for(profile_name)
         self.risk = RiskManager()
 
@@ -90,6 +90,9 @@ class FVGScanner:
             elif sig.tp_r > max_rr:
                 tp = entry + side * risk * max_rr
         rr = abs(tp - entry) / risk
+        min_rr_post = params.get("min_rr_post", 0.0)
+        if min_rr_post > 0 and rr < min_rr_post:
+            return None
         rd = self.risk.evaluate(symbol, side, entry, sl, tp, now_utc_day=None,
                                 realized_wr=None)
         if not rd.ok:
