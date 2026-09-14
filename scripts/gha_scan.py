@@ -38,7 +38,7 @@ except Exception:
 
 import os
 
-from engine.scanner import FVGScanner, format_message
+from engine.scanner import FVGScanner, format_message, format_zone_alert
 from strategy.profiles import PROFILES, SYMBOL_RUNTIME
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -87,12 +87,13 @@ def load_state() -> dict:
             return json.loads(STATE_FILE.read_text())
         except Exception as e:
             log.warning("state unreadable (%s); starting fresh", e)
-    return {"offset": 0, "profile": "hi", "delivered": [], "history": []}
+    return {"offset": 0, "profile": "hi", "delivered": [], "zones": [], "history": []}
 
 
 def save_state(s: dict) -> None:
     GHA_STATE_DIR.mkdir(exist_ok=True)
     s["delivered"] = s["delivered"][-500:]
+    s["zones"] = s["zones"][-200:]
     s["history"] = s["history"][:200]
     STATE_FILE.write_text(json.dumps(s, indent=1, sort_keys=True, default=str))
 
@@ -165,8 +166,29 @@ def scan_and_deliver(state: dict) -> None:
         return
     sc = FVGScanner(state.get("profile", "hi"))
     delivered = set(state.get("delivered", []))
+    advised_zones = set(state.get("zones", []))
     sent_this_tick = 0
     for sym, rt in SYMBOL_RUNTIME.items():
+        try:
+            zones = sc.scan_new_zones(sym, rt["entry_tf"], rt["bias_htf"],
+                                      lookback=LOOKBACK_BARS)
+        except Exception as e:
+            log.warning("zone scan %s failed: %s", sym, e)
+            zones = []
+        for za in zones:
+            zkey = f"{sym}:{za.ts.isoformat()}"
+            if zkey in advised_zones or sent_this_tick >= MAX_SENDS_PER_TICK:
+                continue
+            if sent_this_tick >= MAX_SENDS_PER_TICK:
+                log.warning("send cap reached; zone %s queued", zkey)
+                continue
+            ok = send(CHAT_ID, format_zone_alert(za))
+            if ok:
+                advised_zones.add(zkey)
+                sent_this_tick += 1
+                log.info("zone alert %s", zkey)
+            else:
+                log.warning("zone %s send failed (retry next tick)", zkey)
         try:
             sigs = sc.scan_catchup(sym, rt["entry_tf"], rt["bias_htf"],
                                    lookback=LOOKBACK_BARS)
@@ -193,6 +215,7 @@ def scan_and_deliver(state: dict) -> None:
             else:
                 log.warning("failed to deliver %s (will retry next tick)", key)
     state["delivered"] = sorted(delivered)
+    state["zones"] = sorted(advised_zones)
 
 
 def main() -> None:

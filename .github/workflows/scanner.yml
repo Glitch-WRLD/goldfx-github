@@ -59,10 +59,11 @@ jobs:
             echo "no state change - nothing to commit"
           fi
 
-      - name: Keep the bot alive (self-dispatch in ~12 min)
+      - name: Keep the bot alive (self-dispatch in ~3 min)
         # GitHub's `schedule` trigger can be delayed for hours, so each run
         # re-dispatches itself after a short sleep instead. This makes the bot
-        # self-sustaining cadence ~13 min even when the cron is stalled.
+        # self-sustaining with a ~3-4 min cadence even when the cron is stalled
+        # (public repos get UNLIMITED Actions minutes, so this is free).
         # Requires the CRON_PAT secret (fine-grained PAT, "Actions" read+write).
         if: always()
         env:
@@ -72,7 +73,7 @@ jobs:
             echo "!! CRON_PAT secret missing - relying on schedule trigger only"
             exit 0
           fi
-          sleep 720
+          sleep 180
           code=$(curl -s -o /tmp/dispatch.json -w "%{http_code}" \
             -X POST \
             -H "Authorization: Bearer $CRON_PAT" \

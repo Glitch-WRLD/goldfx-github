@@ -16,7 +16,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from data.tv_data import get_df
+from data.tv_data import get_df, load_cached
 from engine.risk import RiskManager, format_decimal
 from strategy import candidates, indicators as ind
 from strategy.profiles import SYMBOL_RUNTIME, profile_for
@@ -44,6 +44,16 @@ class ScanSignal:
     messages: list[str] = field(default_factory=list)
     confidence: int = 0
     confidence_label: str = ""
+
+
+@dataclass
+class ZoneAlert:
+    symbol: str
+    ts: pd.Timestamp
+    bottom: float
+    top: float
+    bias_htf: str
+    bias: int
 
 
 class FVGScanner:
@@ -154,6 +164,31 @@ class FVGScanner:
                  "HIGH" if score >= 65 else
                  "MEDIUM" if score >= 45 else "LOW")
         return score, label
+
+    def scan_new_zones(self, symbol: str, entry_tf: str, bias_htf: str,
+                       lookback: int = 40) -> list[ZoneAlert]:
+        """Detect FVG zones formed on the most recent CLOSED bars and aligned
+        with the current HTF bias (long-only strategy: bullish zones only).
+        Used for the "watch zone" pre-alert sent before a retest confirms.
+        """
+        df = load_cached(symbol, entry_tf)
+        if len(df) < 60:
+            return []
+        sub = df.iloc[-lookback:].copy()
+        bias = self.current_bias(symbol, entry_tf, bias_htf)
+        if bias != 1:
+            return []
+        H, L = sub["high"], sub["low"]
+        n = len(sub)
+        last = n - 2  # last fully closed bar
+        out: list[ZoneAlert] = []
+        for i in range(max(2, last - 1), last + 1):
+            if H.iloc[i - 2] < L.iloc[i]:
+                bot, top = float(H.iloc[i - 2]), float(L.iloc[i])
+                out.append(ZoneAlert(symbol=symbol, ts=sub.index[i],
+                                     bottom=bot, top=top,
+                                     bias_htf=bias_htf, bias=bias))
+        return out
 
     def scan_symbol(self, symbol: str, entry_tf: str | None = None,
                     bias_htf: str | None = None) -> ScanSignal | None:
@@ -267,3 +302,20 @@ def format_message(sig: ScanSignal) -> str:
         riskline = "Risk sizing unavailable - check account config."
     tail = f"{riskline}\n\n\u26A0\ufe0f Not financial advice. Confirm quotes with your broker."
     return header + body + tail
+
+
+def format_zone_alert(za: ZoneAlert) -> str:
+    sym = za.symbol
+    bot = format_decimal(sym, za.bottom)
+    top = format_decimal(sym, za.top)
+    bias = "BULLISH" if za.bias == 1 else "BEARISH"
+    return (
+        f"\u26A0\ufe0f {sym} \u2014 FVG ZONE FORMED (watch for retest)\n"
+        f"{'\u2500' * 26}\n"
+        f"\U0001F4CA New imbalance on {za.bias_htf} bias \u00b7 {bias}\n"
+        f"\U0001F3AF Zone  {bot} \u2013 {top}\n"
+        f"\U0001F553 Price may retest this zone next bars.\n"
+        f"Full {sym} setup posts automatically when the retest confirms.\n"
+        f"{'\u2500' * 26}\n"
+        f"\u26A0\ufe0f Heads-up only \u2014 not a signal. Confirm quotes with your broker."
+    )
