@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from data.tv_data import get_df
 from engine.risk import RiskManager, format_decimal
-from strategy import candidates
+from strategy import candidates, indicators as ind
 from strategy.profiles import SYMBOL_RUNTIME, profile_for
 
 FVG_SIGNALLER = candidates.STRATEGIES["fvg_retest"].signaller
@@ -42,6 +42,8 @@ class ScanSignal:
     risk_usd: float = 0.0
     risk_pct: float = 0.0
     messages: list[str] = field(default_factory=list)
+    confidence: int = 0
+    confidence_label: str = ""
 
 
 class FVGScanner:
@@ -58,6 +60,10 @@ class FVGScanner:
         """
         params = dict(self.profile["params"])
         params["bias_htf"] = bias_htf
+        try:
+            idx = int(sub.index.get_loc(sig.ts))
+        except (KeyError, TypeError):
+            return None
         side = sig.dir
         sl = entry - side * sig.sl_offset
         risk = abs(entry - sl)
@@ -79,13 +85,75 @@ class FVGScanner:
         if not rd.ok:
             return None
         bias = 1 if params.get("long_only") else 0
+        conf, conf_label = self._compute_confidence(sub, sig, idx, bias_htf)
         return ScanSignal(
             symbol=symbol, direction=side, entry_tf=entry_tf, bias_htf=bias_htf,
             ts=sig.ts, entry=entry, stop=sl, take_profit=tp, rr=round(float(rr), 2),
             reason=sig.reason, profile=self.profile["name"], bias=bias,
             lots=rd.lots, risk_usd=rd.risk_usd, risk_pct=self.risk.risk_pct,
-            messages=rd.messages,
+            messages=rd.messages, confidence=conf, confidence_label=conf_label,
         )
+
+    def _compute_confidence(self, sub, sig, idx, bias_htf) -> tuple[int, str]:
+        """0-100 conviction score from confluence at the signal bar:
+        imbalance strength, zone freshness, HTF-bias pull, MACD momentum and
+        volume impulse. NaN components are dropped and weights renormalised.
+        """
+        p = self.profile["params"]
+        H, L, C = sub["high"], sub["low"], sub["close"]
+        ATR = ind.atr(sub, int(p.get("atr_len", 14)))
+        a = float(ATR.iloc[idx]) if pd.notna(ATR.iloc[idx]) else float("nan")
+        parts: list[tuple[float, float]] = []
+
+        def add(score, w):
+            if score is not None and score == score and score >= 0:
+                parts.append((float(score), float(w)))
+
+        if a > 0:
+            # nearest FVG zone: thickness / ATR + freshness
+            th = age = None
+            for j in range(idx, max(2, idx - 120), -1):
+                if sig.dir == 1 and H.iloc[j - 2] < L.iloc[j]:
+                    th, age = float(L.iloc[j] - H.iloc[j - 2]), idx - j
+                    break
+                if sig.dir == -1 and L.iloc[j - 2] > H.iloc[j]:
+                    th, age = float(L.iloc[j - 2] - H.iloc[j]), idx - j
+                    break
+            if th is not None and age is not None:
+                add(min(100.0, th / a * 60.0), 0.25)
+                add(max(0.0, (1 - age / max(float(p.get("fvg_max_age", 30)), 1)) * 100.0), 0.20)
+            # HTF-bias conviction: distance from price to the bias-TF EMA50
+            try:
+                rule = {"H1": "1h", "H2": "2h", "H4": "4h"}.get(bias_htf, bias_htf)
+                hdf = sub.resample(rule).agg(
+                    {"open": "first", "high": "max", "low": "min", "close": "last"}).dropna()
+                e = ind.ema(hdf["close"], int(p.get("bias_ema", 50)))
+                e = e.reindex(sub.index, method="ffill").ffill()
+                ev = e.iloc[idx] if pd.notna(e.iloc[idx]) else None
+                if ev is not None:
+                    dist = (C.iloc[idx] - ev) * sig.dir / a
+                    add(min(100.0, max(0.0, 40 + dist * 40)), 0.25)
+            except Exception:
+                pass
+            # MACD momentum agreement
+            line, sigl, _ = ind.macd(C, 12, 26, 9)
+            if pd.notna(line.iloc[idx]):
+                bull = line.iloc[idx] > sigl.iloc[idx]
+                add(100.0 if (bull and line.iloc[idx] * sig.dir > 0)
+                    else (55.0 if bull else 0.0), 0.20)
+            # volume impulse vs 20-bar average
+            if "volume" in sub.columns:
+                v20 = ind.sma(sub["volume"].astype(float), 20)
+                v = float(sub["volume"].iloc[idx])
+                if pd.notna(v20.iloc[idx]) and v20.iloc[idx] > 0:
+                    add(min(100.0, v / v20.iloc[idx] * 50.0), 0.10)
+
+        tot = sum(w for _, w in parts) or 1.0
+        score = int(round(sum(s * w for s, w in parts) / tot))
+        label = ("VERY HIGH" if score >= 82 else
+                 "HIGH" if score >= 65 else
+                 "MEDIUM" if score >= 45 else "LOW")
+        return score, label
 
     def scan_symbol(self, symbol: str, entry_tf: str | None = None,
                     bias_htf: str | None = None) -> ScanSignal | None:
@@ -176,19 +244,26 @@ def format_message(sig: ScanSignal) -> str:
     e = format_decimal(sym, sig.entry)
     sl = format_decimal(sym, sig.stop)
     tp = format_decimal(sym, sig.take_profit)
-    header = f"{emoji} {sym} — {d} SETUP\n\U0001F50D {sig.reason}\n"
+
+    n = max(1, min(5, round(sig.confidence / 20)))
+    conf_bar = "\u25B0" * n + "\u25B1" * (5 - n) if sig.confidence > 0 else "\u2013"
+
+    header = (
+        f"{emoji} {sym} \u2014 {d} SETUP\n"
+        f"Confidence: {sig.confidence}% {sig.confidence_label}  [{conf_bar}]\n"
+        f"{'\u2500' * 26}"
+    )
     body = (
-        f"Timeframe: {sig.entry_tf} (bias {sig.bias_htf})\n"
-        f"Entry zone: {e} @ market open\n"
-        f"Stop-loss:  {sl}\n"
-        f"Take-profit: {tp}\n"
-        f"R:R = 1 : {sig.rr:.2f}\n"
+        f"\n\U0001F4CC Entry zone   {e}  @ market open"
+        f"\n\U0001F6D1 Stop-loss    {sl}   (risk {sig.risk_pct:.1f}%)"
+        f"\n\U0001F3AF Take-profit  {tp}   (R:R 1 : {sig.rr:.2f})\n"
+        f"{'\u2500' * 26}\n"
+        f"\U0001F4CA {sig.reason} \u00b7 {sig.entry_tf} setup, {sig.bias_htf} bias\n"
     )
     if sig.lots > 0:
-        riskline = (f"Risk: {sig.risk_usd:.2f} USD ({sig.risk_pct:.1f}%)  "
-                    f"Size: {sig.lots:.2f} lots")
+        riskline = (f"\U0001F4B5 Risk {sig.risk_usd:.2f} USD ({sig.risk_pct:.1f}%) "
+                    f"\u00b7 Size {sig.lots:.2f} lots")
     else:
         riskline = "Risk sizing unavailable - check account config."
-    tail = f"\n{riskline}\n\n"
-    tail += "Not financial advice. Manage risk. Confirm with your broker's quotes."
+    tail = f"{riskline}\n\n\u26A0\ufe0f Not financial advice. Confirm quotes with your broker."
     return header + body + tail
