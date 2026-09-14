@@ -50,21 +50,30 @@ class FVGScanner:
         self.risk = RiskManager()
 
     def _build_signal(self, symbol, entry_tf, bias_htf, sub, sig, entry) -> ScanSignal:
-        """Convert a strategy Signal (on bar index within ``sub``) to a live one."""
+        """Convert a strategy Signal (on bar index within ``sub``) to a live one.
+
+        Mirrors ``backtester.run_backtest`` TP resolution exactly: structural
+        ``tp_price`` is used as-is; otherwise the fallback ``tp_r`` is clamped
+        into the profile's [min_rr, max_rr] band.
+        """
         params = dict(self.profile["params"])
         params["bias_htf"] = bias_htf
         side = sig.dir
         sl = entry - side * sig.sl_offset
         risk = abs(entry - sl)
-        tp = entry + side * risk * sig.tp_r
-        if sig.tp_price is not None:
-            raw_rr = side * (sig.tp_price - entry) / risk
-            rr = max(params.get("min_rr", 0.0), min(raw_rr, params.get("max_rr", 1.0)))
-            tp = entry + side * risk * rr
-        else:
-            rr = sig.tp_r
         if risk <= 0:
             return None
+        tp = entry + side * risk * sig.tp_r
+        if sig.tp_price is not None:
+            tp = sig.tp_price
+        else:
+            min_rr = params.get("min_rr", 0.0)
+            max_rr = params.get("max_rr", 3.0)
+            if sig.tp_r < min_rr:
+                tp = entry + side * risk * min_rr
+            elif sig.tp_r > max_rr:
+                tp = entry + side * risk * max_rr
+        rr = abs(tp - entry) / risk
         rd = self.risk.evaluate(symbol, side, entry, sl, tp, now_utc_day=None,
                                 realized_wr=None)
         if not rd.ok:
