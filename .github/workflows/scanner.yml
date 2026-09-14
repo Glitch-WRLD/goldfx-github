@@ -32,6 +32,15 @@ jobs:
       - name: Install deps
         run: pip install -r requirements-gha.txt
 
+      - name: Require secrets
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: |
+          [ -n "$BOT_TOKEN" ] || { echo "!! BOT_TOKEN repository secret is missing"; exit 1; }
+          [ -n "$CHAT_ID" ] || { echo "!! CHAT_ID repository secret is missing"; exit 1; }
+          echo "secrets present"
+
       - name: Scan + deliver
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
