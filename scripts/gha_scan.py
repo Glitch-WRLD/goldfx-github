@@ -66,6 +66,12 @@ def tg(method: str, **params) -> dict:
                 url, data=body, headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=30) as r:
                 return json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            try:
+                last = f"HTTP {e.code}: {e.read().decode()[:300]}"
+            except Exception:
+                last = e
+            time.sleep(2 * (attempt + 1))
         except Exception as e:
             last = e
             time.sleep(2 * (attempt + 1))
