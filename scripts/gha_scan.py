@@ -121,7 +121,8 @@ def load_state() -> dict:
             return json.loads(STATE_FILE.read_text())
         except Exception as e:
             log.warning("state unreadable (%s); starting fresh", e)
-    return {"offset": 0, "profile": "balanced", "delivered": [], "zones": [], "history": []}
+    return {"offset": 0, "profile": "balanced", "delivered": [], "zones": [],
+            "history": [], "outcomes": {}}
 
 
 def save_state(s: dict) -> None:
@@ -129,6 +130,10 @@ def save_state(s: dict) -> None:
     s["delivered"] = s["delivered"][-500:]
     s["zones"] = s["zones"][-200:]
     s["history"] = s["history"][:200]
+    s.setdefault("outcomes", {})
+    outstanding = [(k, v) for k, v in s["outcomes"].items()
+                   if v.get("status") in ("pending", "posted")]
+    s["outcomes"] = dict(outstanding[-500:])
     STATE_FILE.write_text(json.dumps(s, indent=1, sort_keys=True, default=str))
 
 
@@ -253,6 +258,96 @@ def scan_and_deliver(state: dict) -> None:
     state["zones"] = sorted(advised_zones)
 
 
+# --------------------------------------------------------------------------- outcomes
+def format_outcome(h: dict, hit: str, when_ts, exit_price: float) -> str:
+    """Follow-up message posted when a delivered signal's TP or SL is touched."""
+    d = h.get("dir", "?")
+    sym = h.get("symbol", "?")
+    emoji = "\U0001F7E2" if d == "LONG" else "\U0001F534"
+    res = "\U0001F3AF TP HIT" if hit == "tp" else "\u26D4 SL HIT"
+    rr = float(h.get("rr", 0))
+    sign = "+" if hit == "tp" else "-"
+    e = format_decimal(sym, h.get("entry", 0))
+    p = format_decimal(sym, exit_price)
+    return (
+        f"{emoji} {sym} \u2014 {res}"
+        f"\n{'\u2500' * 26}"
+        f"\n{d} \u00b7 entry {e} \u00b7 exit {p}"
+        f"\n{sign}{abs(rr):.2f}R  \u00b7 {str(when_ts)[:16]}"
+        f"\n{'\u2500' * 26}\n"
+        f"\u26A0\ufe0f Not financial advice."
+    )
+
+
+def check_outcomes(state: dict) -> int:
+    """Walk forward bars for every delivered signal whose outcome is unknown and
+    post a TP/SL follow-up message once price reaches the level. Returns the
+    number of follow-ups posted this tick."""
+    from data.tv_data import get_df
+    outcomes = state.setdefault("outcomes", {})
+    sent = 0
+    seen = set()
+    frames: dict = {}
+    for h in state.get("history", []):
+        sym = h.get("symbol"); tf = h.get("tf"); ts = h.get("ts")
+        if not sym or not tf or not ts:
+            continue
+        key = f"{sym}:{ts}"
+        if key in seen:
+            continue
+        seen.add(key)
+        if outcomes.get(key, {}).get("status") == "posted":
+            continue
+        if (sym, tf) not in frames:
+            try:
+                frames[(sym, tf)] = get_df(sym, tf, refresh=False)
+            except Exception as e:
+                log.warning("outcome fetch %s: %s", key, e)
+                frames[(sym, tf)] = None
+        df = frames[(sym, tf)]
+        if df is None or len(df) < 5:
+            continue
+        import pandas as pd
+        try:
+            idx = int(df.index.get_loc(pd.Timestamp(ts)))
+        except (KeyError, TypeError):
+            outcomes[key] = {"status": "posted", "hit": "drop", "ts": ts}
+            continue
+        entry = float(h.get("entry", 0))
+        sl = float(h.get("sl", 0))
+        tp = float(h.get("tp", 0))
+        if not (entry and sl and tp):
+            outcomes[key] = {"status": "posted", "hit": "drop", "ts": ts}
+            continue
+        direction = 1 if h.get("dir") == "LONG" else -1
+        hit = None; when = None; ep = None
+        for i in range(idx + 1, len(df)):
+            hi = float(df["high"].iloc[i]); lo = float(df["low"].iloc[i])
+            t = df.index[i]
+            if direction == 1:
+                if hi >= tp: hit, when, ep = "tp", t, tp; break
+                if lo <= sl: hit, when, ep = "sl", t, sl; break
+            else:
+                if lo <= tp: hit, when, ep = "tp", t, tp; break
+                if hi >= sl: hit, when, ep = "sl", t, sl; break
+        if hit is None:
+            continue  # still running; wait for next tick
+        if sent >= MAX_SENDS_PER_TICK:
+            outcomes[key] = {"status": "pending", "hit": hit, "when": str(when),
+                             "price": ep, "ts": ts}
+            continue
+        ok = send(CHAT_ID, format_outcome(h, hit, when, ep))
+        if ok:
+            outcomes[key] = {"status": "posted", "hit": hit, "when": str(when),
+                             "price": ep, "ts": ts}
+            sent += 1
+            log.info("outcome %s: %s", key, hit)
+        else:
+            outcomes[key] = {"status": "pending", "hit": hit, "when": str(when),
+                             "price": ep, "ts": ts}
+    return sent
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-updates", action="store_true",
@@ -264,6 +359,7 @@ def main() -> None:
 
     state = load_state()
     scan_and_deliver(state)
+    check_outcomes(state)
     if not args.no_updates and os.getenv("GHA_NO_UPDATES") != "1":
         handle_commands(state, no_updates=False)
     else:
