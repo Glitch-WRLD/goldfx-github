@@ -69,6 +69,9 @@ def log_identity() -> None:
     else:
         log.warning("identity: getMe failed: %s", me.get("description"))
     if CHAT_ID:
+        log.info("identity: chat_raw len=%d starts_minus=%s numeric=%s",
+                 len(CHAT_ID), CHAT_ID.startswith("-"),
+                 CHAT_ID.lstrip("-").isdigit())
         c = tg("getChat", chat_id=CHAT_ID)
         if c.get("ok"):
             log.info("identity: chat resolves to id=%s type=%s title=%r",
