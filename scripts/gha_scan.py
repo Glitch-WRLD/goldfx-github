@@ -38,6 +38,7 @@ except Exception:
 
 import os
 
+from engine.risk import format_decimal
 from engine.scanner import FVGScanner, format_message, format_zone_alert
 from strategy.profiles import PROFILES, SYMBOL_RUNTIME
 
