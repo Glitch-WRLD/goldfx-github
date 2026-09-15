@@ -307,6 +307,7 @@ def format_message(sig: ScanSignal) -> str:
         f"\n\U0001F3AF Take-profit  {tp}   (R:R 1 : {sig.rr:.2f})\n"
         f"{'\u2500' * 26}\n"
         f"\U0001F4CA {sig.reason} \u00b7 {sig.entry_tf} setup, {sig.bias_htf} bias\n"
+        f"\U0001F4F7 Captured {sig.ts.strftime('%a %d %b %H:%M')} UTC\n"
     )
     if sig.lots > 0:
         riskline = (f"\U0001F4B5 Risk {sig.risk_usd:.2f} USD ({sig.risk_pct:.1f}%) "
