@@ -296,6 +296,7 @@ def format_message(sig: ScanSignal) -> str:
     n = max(1, min(5, round(sig.confidence / 20)))
     conf_bar = "\u25B0" * n + "\u25B1" * (5 - n) if sig.confidence > 0 else "\u2013"
 
+    captured = sig.ts.tz_convert("Africa/Accra").strftime("%a %d %b %H:%M")
     header = (
         f"{emoji} {sym} \u2014 {d} SETUP\n"
         f"Confidence: {sig.confidence}% {sig.confidence_label}  [{conf_bar}]\n"
@@ -307,7 +308,7 @@ def format_message(sig: ScanSignal) -> str:
         f"\n\U0001F3AF Take-profit  {tp}   (R:R 1 : {sig.rr:.2f})\n"
         f"{'\u2500' * 26}\n"
         f"\U0001F4CA {sig.reason} \u00b7 {sig.entry_tf} setup, {sig.bias_htf} bias\n"
-        f"\U0001F4F7 Captured {sig.ts.strftime('%a %d %b %H:%M')} UTC\n"
+        f"\U0001F4F7 Captured {captured} (Accra time)\n"
     )
     if sig.lots > 0:
         riskline = (f"\U0001F4B5 Risk {sig.risk_usd:.2f} USD ({sig.risk_pct:.1f}%) "
