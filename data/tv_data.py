@@ -32,12 +32,17 @@ def _cache_path(symbol: str, tf: str) -> Path:
 
 def load_cached(symbol: str, tf: str) -> pd.DataFrame | None:
     p = _cache_path(symbol, tf)
-    if p.exists():
+    candidates = [p, p.with_suffix(".csv")] if p.suffix == ".parquet" else [p]
+    for path in candidates:
+        if not path.exists():
+            continue
         try:
-            df = pd.read_parquet(p)
+            df = pd.read_parquet(path)
         except Exception:
-            # engine missing (no pyarrow/fastparquet on lean runners) or corrupt cache
-            return None
+            try:
+                df = pd.read_csv(path)
+            except Exception:
+                continue
         for col in ("time", "index", "Time"):
             if col in df.columns:
                 df[col] = pd.to_datetime(df[col], utc=True)
@@ -55,11 +60,15 @@ def save_cached(symbol: str, tf: str, df: pd.DataFrame) -> None:
     try:
         out.reset_index().to_parquet(_cache_path(symbol, tf), index=False)
     except Exception:
-        # no parquet engine available (lean runner): skip caching, fetch-only
-        pass
+        # no parquet engine available (lean runner): fall back to CSV so the
+        # runner can still cache between ticks instead of re-fetching every time
+        try:
+            out.reset_index().to_csv(_cache_path(symbol, tf).with_suffix(".csv"))
+        except Exception:
+            pass
 
 
-async def fetch_bars(symbol: str, tf: str, bars: int = 40000) -> pd.DataFrame:
+async def fetch_bars(symbol: str, tf: str, bars: int = 4000) -> pd.DataFrame:
     """Pull up to ``bars`` most-recent OHLCV candles for symbol/timeframe."""
     interval = _INTERVAL[tf]
     async with AsyncTradingView(timeout=30) as tv:
