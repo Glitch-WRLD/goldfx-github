@@ -54,6 +54,31 @@ TOKEN = os.getenv("BOT_TOKEN", "")
 CHAT_ID = os.getenv("CHAT_ID", "")
 
 
+def log_identity() -> None:
+    """Debug the configured bot+chat WITHOUT printing secrets:
+    reports the bot username and the resolved chat's id/title so a
+    'chat not found' can be traced to a wrong BOT_TOKEN or CHAT_ID."""
+    if not TOKEN:
+        log.info("identity: no BOT_TOKEN configured")
+        return
+    me = tg("getMe")
+    if me.get("ok"):
+        u = me["result"]
+        log.info("identity: bot=@%s (id=%s) chat_raw=%r",
+                 u.get("username"), u.get("id"), CHAT_ID)
+    else:
+        log.warning("identity: getMe failed: %s", me.get("description"))
+    if CHAT_ID:
+        c = tg("getChat", chat_id=CHAT_ID)
+        if c.get("ok"):
+            log.info("identity: chat resolves to id=%s type=%s title=%r",
+                     c["result"].get("id"), c["result"].get("type"),
+                     c["result"].get("title"))
+        else:
+            log.warning("identity: getChat(%r) failed: %s",
+                        CHAT_ID, c.get("description"))
+
+
 # --------------------------------------------------------------------------- telegram
 def tg(method: str, **params) -> dict:
     """Direct call to the Bot API; retries transient network errors."""
@@ -170,6 +195,7 @@ def scan_and_deliver(state: dict) -> None:
     if not TOKEN or not CHAT_ID:
         log.error("BOT_TOKEN / CHAT_ID not set")
         return
+    log_identity()
     sc = FVGScanner(state.get("profile", "balanced"))
     delivered = set(state.get("delivered", []))
     advised_zones = set(state.get("zones", []))
