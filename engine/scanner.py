@@ -82,6 +82,13 @@ class FVGScanner:
         tp = entry + side * risk * sig.tp_r
         if sig.tp_price is not None:
             tp = sig.tp_price
+            rr = side * (tp - entry) / risk
+            min_rr = params.get("min_rr", 0.0)
+            max_rr = params.get("max_rr", 3.0)
+            if rr < min_rr:
+                tp = entry + side * risk * min_rr
+            elif rr > max_rr:
+                tp = entry + side * risk * max_rr
         else:
             min_rr = params.get("min_rr", 0.0)
             max_rr = params.get("max_rr", 3.0)
