@@ -43,7 +43,6 @@ BAL_PROFILE = {
 # Chosen on the strongest backtest cells per pair.
 SYMBOL_RUNTIME = {
     "XAUUSD": {"entry_tf": "M30", "bias_htf": "H1"},
-    "EURUSD": {"entry_tf": "H1", "bias_htf": "H2"},
     "AUDUSD": {"entry_tf": "H1", "bias_htf": "H4"},
     "GBPUSD": {"entry_tf": "H1", "bias_htf": "H4"},
 }
