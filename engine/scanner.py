@@ -100,6 +100,12 @@ class FVGScanner:
         min_rr_post = params.get("min_rr_post", 0.0)
         if min_rr_post > 0 and rr < min_rr_post:
             return None
+        # session-skip filter: avoid known reversal windows (blacklisted hours)
+        skip = params.get("session_skip_hours", None)
+        if skip:
+            ts_hour = sig.ts.hour + sig.ts.minute / 60
+            if any(lo <= ts_hour < hi for lo, hi in skip):
+                return None
         rd = self.risk.evaluate(symbol, side, entry, sl, tp, now_utc_day=None,
                                 realized_wr=None)
         if not rd.ok:

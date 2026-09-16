@@ -173,6 +173,14 @@ def run_backtest(df: pd.DataFrame, symbol: str, tf: str, strategy: str,
             if resolved_rr < min_rr_post:
                 continue
 
+        # session-skip filter: avoid known reversal windows (blacklisted hours)
+        # where FVG retests disproportionately fail.
+        skip = params.get("session_skip_hours", None)
+        if skip:
+            ts_hour = pd.Timestamp(sig.ts).hour + pd.Timestamp(sig.ts).minute / 60
+            if any(lo <= ts_hour < hi for lo, hi in skip):
+                continue
+
         exit_ts = None
         exit_price = None
         r = 0.0
