@@ -243,16 +243,18 @@ def scan_and_deliver(state: dict) -> None:
             if sent_this_tick >= MAX_SENDS_PER_TICK:
                 log.warning("send cap reached; %s queued for next tick", key)
                 continue
-            ok = send(CHAT_ID, format_message(sig))
+            ref = state.get("ref_seq", 0) + 1
+            ok = send(CHAT_ID, format_message(sig, ref=ref))
             if ok:
                 delivered.add(key)
                 sent_this_tick += 1
+                state["ref_seq"] = ref
                 state["history"].insert(0, {
                     "symbol": sym, "dir": "LONG" if sig.direction == 1 else "SHORT",
                     "ts": sig.ts.isoformat(), "tf": sig.entry_tf,
                     "entry": sig.entry, "sl": sig.stop, "tp": sig.take_profit,
-                    "rr": sig.rr, "profile": sig.profile})
-                log.info("delivered %s", key)
+                    "rr": sig.rr, "profile": sig.profile, "ref": ref})
+                log.info("delivered %s as setup #%04d", key, ref)
             else:
                 log.warning("failed to deliver %s (will retry next tick)", key)
     state["delivered"] = sorted(delivered)
@@ -270,8 +272,10 @@ def format_outcome(h: dict, hit: str, when_ts, exit_price: float) -> str:
     sign = "+" if hit == "tp" else "-"
     e = format_decimal(sym, h.get("entry", 0))
     p = format_decimal(sym, exit_price)
+    ref = h.get("ref")
+    ref_line = "" if ref is None else f"  \u00b7 setup #{ref:04d}"
     return (
-        f"{emoji} {sym} \u2014 {res}"
+        f"{emoji} {sym} \u2014 {res}{ref_line}"
         f"\n{'\u2500' * 26}"
         f"\n{d} \u00b7 entry {e} \u00b7 exit {p}"
         f"\n{sign}{abs(rr):.2f}R  \u00b7 {str(when_ts)[:16]}"

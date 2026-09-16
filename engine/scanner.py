@@ -291,7 +291,7 @@ class FVGScanner:
         return "BULLISH" if v > 0 else "BEARISH" if v < 0 else "NEUTRAL"
 
 
-def format_message(sig: ScanSignal) -> str:
+def format_message(sig: ScanSignal, ref: int | None = None) -> str:
     sym = sig.symbol
     d = "LONG" if sig.direction == 1 else "SHORT"
     emoji = "\U0001F7E2" if sig.direction == 1 else "\U0001F534"
@@ -304,8 +304,9 @@ def format_message(sig: ScanSignal) -> str:
 
     captured = sig.ts.tz_convert("Africa/Accra").strftime("%a %d %b %H:%M")
     header = (
-        f"{emoji} {sym} \u2014 {d} SETUP\n"
-        f"Confidence: {sig.confidence}% {sig.confidence_label}  [{conf_bar}]\n"
+        f"{emoji} {sym} \u2014 {d} SETUP"
+        + (f"  #{ref:04d}" if ref is not None else "")
+        + f"\nConfidence: {sig.confidence}% {sig.confidence_label}  [{conf_bar}]\n"
         f"{'\u2500' * 26}"
     )
     body = (
