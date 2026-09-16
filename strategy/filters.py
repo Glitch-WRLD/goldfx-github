@@ -75,7 +75,8 @@ def fvg_retest_signal(df: pd.DataFrame, p: dict, dir_: int, atr: pd.Series,
                         else:
                             trigger = False
                     if trigger:
-                        lo_edge = bot - 0.2 * A[i] if dir_ == 1 else top + 0.2 * A[i]
+                        sb = float(p.get("sl_buf", 0.2))
+                        lo_edge = bot - sb * A[i] if dir_ == 1 else top + sb * A[i]
                         sl_off = abs(C[ref] - lo_edge)
                         if sl_off > 0:
                             out.append((ts_i, float(sl_off),

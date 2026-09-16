@@ -14,12 +14,12 @@ HI_PROFILE = {
         "bias_htf_by_pair": True, "eur_bias_htf": "H2", "smart_tp": True,
         "min_rr": 0.5, "max_rr": 0.8, "tp_lookback": 60, "confirm": True,
         "min_body_atr": 0.0, "min_rr_post": 0.50,
-        "session_skip_hours": [(13, 15)],
+        "session_skip_hours": [(13, 15)], "sl_buf": 0.25,
     },
     "backtest": {"n": 1073, "win_rate": 0.566, "profit_factor": 1.30,
                  "total_r": 141.0, "exp_rpermonth": 6.7},
-    "backtest_rr050": {"n": 393, "win_rate": 0.547, "profit_factor": 1.21,
-                       "total_r": 37.0, "exp_rpermonth": 1.7},
+    "backtest_rr050": {"n": 393, "win_rate": 0.557, "profit_factor": 1.26,
+                       "total_r": 45.0, "exp_rpermonth": 2.1},
 }
 
 BAL_PROFILE = {
@@ -31,12 +31,12 @@ BAL_PROFILE = {
         "bias_htf_by_pair": True, "eur_bias_htf": "H2", "smart_tp": True,
         "min_rr": 0.7, "max_rr": 1.4, "tp_lookback": 60, "confirm": False,
         "min_body_atr": 0.0, "min_rr_post": 0.50,
-        "session_skip_hours": [(13, 15)],
+        "session_skip_hours": [(13, 15)], "sl_buf": 0.25,
     },
     "backtest": {"n": 1654, "win_rate": 0.475, "profit_factor": 1.36,
                  "total_r": 309.1, "exp_rpermonth": 14.7},
-    "backtest_rr050": {"n": 635, "win_rate": 0.457, "profit_factor": 1.26,
-                       "total_r": 90.8, "exp_rpermonth": 4.3},
+    "backtest_rr050": {"n": 630, "win_rate": 0.462, "profit_factor": 1.28,
+                       "total_r": 96.0, "exp_rpermonth": 4.6},
 }
 
 # Per-symbol live settings: entry timeframe + higher-TF bias source.
