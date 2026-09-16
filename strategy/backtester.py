@@ -20,6 +20,9 @@ import pandas as pd
 COSTS = {
     "XAUUSD": {"spread": 0.35, "slippage": 0.10, "point": 0.01},   # $/oz
     "EURUSD": {"spread": 0.00008, "slippage": 0.00002, "point": 0.00001},  # ~0.8 pip
+    "GBPUSD": {"spread": 0.00012, "slippage": 0.00003, "point": 0.00001},  # ~1.2 pip
+    "USDJPY": {"spread": 0.0010, "slippage": 0.0002, "point": 0.0001},     # ~1.0 pip
+    "AUDUSD": {"spread": 0.00008, "slippage": 0.00002, "point": 0.00001},  # ~0.8 pip
 }
 
 

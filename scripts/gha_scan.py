@@ -49,7 +49,7 @@ BASE_DIR = Path(__file__).resolve().parents[1]
 GHA_STATE_DIR = BASE_DIR / "gha_state"
 STATE_FILE = GHA_STATE_DIR / "state.json"
 LOOKBACK_BARS = int(os.getenv("GHA_LOOKBACK", "40"))
-MAX_SENDS_PER_TICK = int(os.getenv("GHA_MAX_SENDS", "3"))
+MAX_SENDS_PER_TICK = int(os.getenv("GHA_MAX_SENDS", "8"))
 
 TOKEN = os.getenv("BOT_TOKEN", "")
 CHAT_ID = os.getenv("CHAT_ID", "")

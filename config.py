@@ -10,6 +10,9 @@ load_dotenv(BASE_DIR / ".env")
 SYMBOLS = {
     "XAUUSD": "OANDA:XAUUSD",
     "EURUSD": "OANDA:EURUSD",
+    "GBPUSD": "OANDA:GBPUSD",
+    "USDJPY": "OANDA:USDJPY",
+    "AUDUSD": "OANDA:AUDUSD",
 }
 # map brand names -> tradingview-sdk Interval
 TIMEFRAMES = ["M15", "M30", "H1", "H2"]
@@ -42,4 +45,7 @@ MIN_TRADES_BEFORE_RESEND_SAME_SETUP = 2
 CONTRACTS = {
     "XAUUSD": {"point": 0.01, "pip_value_per_lot_usd": 100.0 / 100, "digits": 2},
     "EURUSD": {"point": 0.00001, "pip_value_per_lot_usd": 10.0 / 10, "digits": 5},
+    "GBPUSD": {"point": 0.00001, "pip_value_per_lot_usd": 10.0 / 10, "digits": 5},
+    "AUDUSD": {"point": 0.00001, "pip_value_per_lot_usd": 10.0 / 10, "digits": 5},
+    "USDJPY": {"point": 0.0001, "pip_value_per_lot_usd": 10.0 / 10, "digits": 3},
 }
