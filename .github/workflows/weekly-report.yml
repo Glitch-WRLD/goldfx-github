@@ -1,0 +1,34 @@
+name: goldfx-weekly-report
+
+on:
+  schedule:
+    # After the FX weekly close (Fri ~21:00-22:00 UTC). Saturday 06:00 UTC
+    # is safely after close; schedule delays are tolerable (report is lag-tolerant).
+    - cron: '0 6 * * 6'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python with pip cache
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install deps
+        run: pip install -r requirements-gha.txt
+
+      - name: Post weekly report
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python scripts/weekly_report.py
