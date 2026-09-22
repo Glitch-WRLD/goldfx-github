@@ -46,6 +46,8 @@ class ScanSignal:
     confidence_label: str = ""
     ltf_confirmed: bool = False
     ltf_tf: str = ""
+    strategy_type: str = "fvg_retest"          # "fvg_retest", "smc_sweep", "dual_confluence"
+    strategy_badge: str = "⚡ Momentum FVG"    # User-facing badge
 
 
 @dataclass
@@ -89,7 +91,8 @@ class FVGScanner:
             pass
         return False, 0.0
 
-    def _build_signal(self, symbol, entry_tf, bias_htf, sub, sig, entry) -> ScanSignal:
+    def _build_signal(self, symbol, entry_tf, bias_htf, sub, sig, entry,
+                      strategy_type: str = "fvg_retest", is_dual: bool = False) -> ScanSignal:
         """Convert a strategy Signal (on bar index within ``sub``) to a live one.
 
         Mirrors ``backtester.run_backtest`` TP resolution exactly: structural
@@ -154,14 +157,31 @@ class FVGScanner:
             return None
         bias = 1 if params.get("long_only") else 0
         conf, conf_label = self._compute_confidence(sub, sig, idx, bias_htf)
+
+        strat_type = strategy_type or "fvg_retest"
+        if is_dual or strat_type == "dual_confluence":
+            strat_type = "dual_confluence"
+            strat_badge = "🔥 DUAL-CONFLUENCE (FVG + SMC Sweep)"
+            conf = min(98, conf + 25)
+            conf_label = "VERY HIGH [DUAL CONFLUENCE]"
+            reason = "Dual-Confluence: FVG Imbalance Retest + Institutional Inducement Sweep"
+        elif strat_type == "smc_sweep":
+            strat_badge = "🏛️ Institutional SMC Sweep"
+            reason = sig.reason or "SMC Order Block + Inducement Sweep"
+        else:
+            strat_badge = "⚡ Momentum FVG Retest"
+            reason = sig.reason or "FVG Imbalance Retest"
+
         return ScanSignal(
             symbol=symbol, direction=side, entry_tf=entry_tf, bias_htf=bias_htf,
             ts=sig.ts, entry=entry, stop=sl, take_profit=tp, rr=round(float(rr), 2),
-            reason=sig.reason, profile=self.profile["name"], bias=bias,
+            reason=reason, profile=self.profile["name"], bias=bias,
             lots=rd.lots, risk_usd=rd.risk_usd, risk_pct=self.risk.risk_pct,
             messages=rd.messages, confidence=conf, confidence_label=conf_label,
             ltf_confirmed=ltf_confirmed, ltf_tf=ltf_tf,
+            strategy_type=strat_type, strategy_badge=strat_badge,
         )
+
 
 
     def _compute_confidence(self, sub, sig, idx, bias_htf) -> tuple[int, str]:
@@ -264,16 +284,18 @@ class FVGScanner:
         rt = SYMBOL_RUNTIME[symbol]
         entry_tf = entry_tf or rt["entry_tf"]
         bias_htf = bias_htf or rt["bias_htf"]
-        params = dict(self.profile["params"])
-        params["bias_htf"] = bias_htf
+        primary_strat = rt.get("strategy", "fvg_retest")
 
-        strat = rt.get("strategy", "fvg_retest")
-        if strat == "smc_sweep":
-            params["require_bos"] = False
-            params["require_sweep"] = True
-            params["swing_k"] = 2
-            params["min_rr"] = 0.8
-            params["max_rr"] = 2.5
+        fvg_params = dict(self.profile["params"])
+        fvg_params["bias_htf"] = bias_htf
+
+        smc_params = dict(self.profile["params"])
+        smc_params["bias_htf"] = bias_htf
+        smc_params["require_bos"] = False
+        smc_params["require_sweep"] = True
+        smc_params["swing_k"] = 2
+        smc_params["min_rr"] = 0.8
+        smc_params["max_rr"] = 2.5
 
         df = get_df(symbol, entry_tf, refresh=True)
         if df is None or len(df) < 300:
@@ -281,17 +303,35 @@ class FVGScanner:
 
         window = min(len(df), 500)
         sub = df.iloc[-window:].copy()
-        signaller = self._signaller_for(symbol)
-        sigs = signaller(sub, params)
+
+        smc_signaller = candidates.STRATEGIES["smc_sweep"].signaller
+        sigs_fvg = FVG_SIGNALLER(sub, fvg_params)
+        sigs_smc = smc_signaller(sub, smc_params)
 
         last_ts = sub.index[-1]
-        hit = next((s for s in sigs if s.ts == last_ts), None)
-        if hit is None:
-            return None
+        hit_fvg = next((s for s in sigs_fvg if s.ts == last_ts), None)
+        hit_smc = next((s for s in sigs_smc if s.ts == last_ts), None)
 
-        # Entry reference: next market open ~ last close
         entry = float(sub["close"].iloc[-1])
-        return self._build_signal(symbol, entry_tf, bias_htf, sub, hit, entry)
+
+        # Dual-confluence fusion: both triggered on this bar
+        if hit_fvg is not None and hit_smc is not None:
+            if hit_fvg.dir == hit_smc.dir:
+                return self._build_signal(symbol, entry_tf, bias_htf, sub, hit_smc, entry,
+                                          strategy_type="dual_confluence", is_dual=True)
+            else:
+                # Contradictory directions -> skip to prevent conflict
+                return None
+
+        # Standalone check: only emit if matching the pair's primary institutional profile
+        if primary_strat == "smc_sweep" and hit_smc is not None:
+            return self._build_signal(symbol, entry_tf, bias_htf, sub, hit_smc, entry,
+                                      strategy_type="smc_sweep")
+        elif primary_strat == "fvg_retest" and hit_fvg is not None:
+            return self._build_signal(symbol, entry_tf, bias_htf, sub, hit_fvg, entry,
+                                      strategy_type="fvg_retest")
+
+        return None
 
     def scan_catchup(self, symbol: str, entry_tf: str | None = None,
                      bias_htf: str | None = None, lookback: int = 40,
@@ -304,16 +344,18 @@ class FVGScanner:
         rt = SYMBOL_RUNTIME[symbol]
         entry_tf = entry_tf or rt["entry_tf"]
         bias_htf = bias_htf or rt["bias_htf"]
-        params = dict(self.profile["params"])
-        params["bias_htf"] = bias_htf
+        primary_strat = rt.get("strategy", "fvg_retest")
 
-        strat = rt.get("strategy", "fvg_retest")
-        if strat == "smc_sweep":
-            params["require_bos"] = False
-            params["require_sweep"] = True
-            params["swing_k"] = 2
-            params["min_rr"] = 0.8
-            params["max_rr"] = 2.5
+        fvg_params = dict(self.profile["params"])
+        fvg_params["bias_htf"] = bias_htf
+
+        smc_params = dict(self.profile["params"])
+        smc_params["bias_htf"] = bias_htf
+        smc_params["require_bos"] = False
+        smc_params["require_sweep"] = True
+        smc_params["swing_k"] = 2
+        smc_params["min_rr"] = 0.8
+        smc_params["max_rr"] = 2.5
 
         df = get_df(symbol, entry_tf, refresh=True)
         if df is None or len(df) < 300:
@@ -321,15 +363,20 @@ class FVGScanner:
 
         window = min(len(df), 2000)
         sub = df.iloc[-window:].copy()
-        signaller = self._signaller_for(symbol)
-        sigs = signaller(sub, params)
 
+        smc_signaller = candidates.STRATEGIES["smc_sweep"].signaller
+        sigs_fvg = FVG_SIGNALLER(sub, fvg_params)
+        sigs_smc = smc_signaller(sub, smc_params)
+
+        fvg_by_ts = {s.ts: s for s in sigs_fvg}
+        smc_by_ts = {s.ts: s for s in sigs_smc}
+        all_signal_ts = set(fvg_by_ts.keys()) | set(smc_by_ts.keys())
 
         out: list[ScanSignal] = []
         last_closed_idx = len(sub) - 2   # last bar may be in progress
-        for s in sigs:
+        for ts in sorted(all_signal_ts):
             try:
-                idx = int(sub.index.get_loc(s.ts))
+                idx = int(sub.index.get_loc(ts))
             except (KeyError, TypeError):
                 continue
             if idx > last_closed_idx:
@@ -339,10 +386,31 @@ class FVGScanner:
             row = sub.iloc[idx]
             if only_volume and row.get("volume", 0) <= 0:
                 continue
-            sig = self._build_signal(symbol, entry_tf, bias_htf, sub, s,
-                                     float(row["close"]))
-            if sig is not None:
-                out.append(sig)
+
+            s_fvg = fvg_by_ts.get(ts)
+            s_smc = smc_by_ts.get(ts)
+
+            # Check Dual Confluence first
+            if s_fvg is not None and s_smc is not None:
+                if s_fvg.dir == s_smc.dir:
+                    sig = self._build_signal(symbol, entry_tf, bias_htf, sub, s_smc,
+                                             float(row["close"]), strategy_type="dual_confluence", is_dual=True)
+                    if sig is not None:
+                        out.append(sig)
+                else:
+                    # Directional clash -> ignore
+                    continue
+            elif primary_strat == "smc_sweep" and s_smc is not None:
+                sig = self._build_signal(symbol, entry_tf, bias_htf, sub, s_smc,
+                                         float(row["close"]), strategy_type="smc_sweep")
+                if sig is not None:
+                    out.append(sig)
+            elif primary_strat == "fvg_retest" and s_fvg is not None:
+                sig = self._build_signal(symbol, entry_tf, bias_htf, sub, s_fvg,
+                                         float(row["close"]), strategy_type="fvg_retest")
+                if sig is not None:
+                    out.append(sig)
+
         out.sort(key=lambda x: x.ts)
         return out
 
@@ -377,6 +445,7 @@ def format_message(sig: ScanSignal, ref: int | None = None) -> str:
         f"{emoji} {sym} \u2014 {d} SETUP"
         + (f"  #{ref:04d}" if ref is not None else "")
         + ltf_tag
+        + f"\n\U0001F50E Concept: {sig.strategy_badge}"
         + f"\nConfidence: {sig.confidence}% {sig.confidence_label}  [{conf_bar}]\n"
         f"{'\u2500' * 26}"
     )

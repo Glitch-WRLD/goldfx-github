@@ -253,7 +253,8 @@ def scan_and_deliver(state: dict) -> None:
                     "symbol": sym, "dir": "LONG" if sig.direction == 1 else "SHORT",
                     "ts": sig.ts.isoformat(), "tf": sig.entry_tf,
                     "entry": sig.entry, "sl": sig.stop, "tp": sig.take_profit,
-                    "rr": sig.rr, "profile": sig.profile, "ref": ref})
+                    "rr": sig.rr, "profile": sig.profile, "ref": ref,
+                    "strategy_type": sig.strategy_type, "strategy_badge": sig.strategy_badge})
                 log.info("delivered %s as setup #%04d", key, ref)
             else:
                 log.warning("failed to deliver %s (will retry next tick)", key)
