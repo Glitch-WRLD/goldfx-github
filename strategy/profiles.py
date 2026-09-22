@@ -39,13 +39,20 @@ BAL_PROFILE = {
                        "total_r": 96.0, "exp_rpermonth": 4.6},
 }
 
-# Per-symbol live settings: entry timeframe + higher-TF bias source.
-# Chosen on the strongest backtest cells per pair.
+# Per-symbol live settings: entry timeframe + higher-TF bias source + strategy engine.
+# Chosen on the strongest backtest cells per pair (Dual-Engine Arsenal).
 SYMBOL_RUNTIME = {
-    "XAUUSD": {"entry_tf": "M30", "bias_htf": "H1"},
-    "AUDUSD": {"entry_tf": "H1", "bias_htf": "H4"},
-    "GBPUSD": {"entry_tf": "H1", "bias_htf": "H4"},
+    # Momentum & Trend Flow Engine (Baseline FVG Retest)
+    "USDCAD": {"entry_tf": "H1", "bias_htf": "H4", "strategy": "fvg_retest"},
+    "XAUUSD": {"entry_tf": "M30", "bias_htf": "H1", "strategy": "fvg_retest"},
+    "NZDUSD": {"entry_tf": "H1", "bias_htf": "H4", "strategy": "fvg_retest"},
+    "AUDUSD": {"entry_tf": "H1", "bias_htf": "H4", "strategy": "fvg_retest"},
+    "GBPUSD": {"entry_tf": "H1", "bias_htf": "H4", "strategy": "fvg_retest"},
+    # Liquidity Trap & Precision Sniper Engine (SMC Inducement Sweep)
+    "EURUSD": {"entry_tf": "H1", "bias_htf": "H4", "strategy": "smc_sweep"},
+    "USDCHF": {"entry_tf": "H1", "bias_htf": "H4", "strategy": "smc_sweep"},
 }
+
 
 PROFILES = {"hi": HI_PROFILE, "balanced": BAL_PROFILE}
 

@@ -23,6 +23,13 @@ COSTS = {
     "GBPUSD": {"spread": 0.00012, "slippage": 0.00003, "point": 0.00001},  # ~1.2 pip
     "USDJPY": {"spread": 0.0010, "slippage": 0.0002, "point": 0.0001},     # ~1.0 pip
     "AUDUSD": {"spread": 0.00008, "slippage": 0.00002, "point": 0.00001},  # ~0.8 pip
+    "GBPJPY": {"spread": 0.020, "slippage": 0.005, "point": 0.001},        # ~2.0 pips
+    "GBPCAD": {"spread": 0.00020, "slippage": 0.00005, "point": 0.00001},  # ~2.0 pips
+    "EURJPY": {"spread": 0.015, "slippage": 0.003, "point": 0.001},        # ~1.5 pips
+    "USDCAD": {"spread": 0.00012, "slippage": 0.00003, "point": 0.00001},  # ~1.2 pips
+    "USDCHF": {"spread": 0.00012, "slippage": 0.00003, "point": 0.00001},  # ~1.2 pips
+    "NZDUSD": {"spread": 0.00012, "slippage": 0.00003, "point": 0.00001},  # ~1.2 pips
+    "EURGBP": {"spread": 0.00010, "slippage": 0.00002, "point": 0.00001},  # ~1.0 pip
 }
 
 
@@ -126,7 +133,7 @@ def run_backtest(df: pd.DataFrame, symbol: str, tf: str, strategy: str,
                  max_trades: int = 5000) -> BacktestResult:
     """Walk bars; expand indicators vis a fresh frame; evaluate signals at bar
     close, enter next open."""
-    cost = COSTS[symbol]
+    cost = COSTS.get(symbol, {"spread": 0.00015, "slippage": 0.00003, "point": 0.00001})
     df = df.copy()
     params = dict(params or {})
     params["_symbol"] = symbol

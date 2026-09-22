@@ -422,7 +422,23 @@ STRATEGIES: dict[str, Strategy] = {
              "sl_atr": 1.6, "tp_r": 2.0, "atr_len": 14, "min_gap": 4},
         ],
     ),
+    "smc_sweep": Strategy(
+        key="smc_sweep",
+        name="Institutional SMC Liquidity Sweep",
+        logic="Anthony Ikechukwu 4-Rule SMC: FVG with HTF bias, internal inducement sweep, unmitigated POI retest.",
+        signaller=lambda df, p: _smc_sweep(df, p),
+        param_grid=[
+            {"swing_k": 2, "atr_len": 14, "min_gap": 4, "fvg_max_age": 40,
+             "require_bos": False, "require_sweep": True, "sl_buf": 0.20,
+             "tp_r": 1.5, "bias_htf": "H4", "smart_tp": True, "min_rr": 0.8, "max_rr": 2.5}
+        ],
+    ),
 }
+
+
+def _smc_sweep(df: pd.DataFrame, p: dict) -> list[Signal]:
+    from strategy.smc_concept import smc_sweep_signaller
+    return smc_sweep_signaller(df, p)
 
 
 def get_signaller(key: str) -> Optional[Signaller]:

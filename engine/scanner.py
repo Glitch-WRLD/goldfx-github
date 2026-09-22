@@ -44,6 +44,8 @@ class ScanSignal:
     messages: list[str] = field(default_factory=list)
     confidence: int = 0
     confidence_label: str = ""
+    ltf_confirmed: bool = False
+    ltf_tf: str = ""
 
 
 @dataclass
@@ -60,6 +62,32 @@ class FVGScanner:
     def __init__(self, profile_name: str = "balanced"):
         self.profile = profile_for(profile_name)
         self.risk = RiskManager()
+
+    def _confirm_ltf_m15(self, symbol: str, direction: int, sig_ts: pd.Timestamp,
+                          sl: float) -> tuple[bool, float]:
+        """Check if subsequent M15 candle confirms direction. Returns (confirmed, fill_price)."""
+        try:
+            df_m15 = get_df(symbol, "M15", refresh=False)
+            if df_m15 is None or df_m15.empty:
+                return False, 0.0
+            sub = df_m15[df_m15.index >= sig_ts].head(2)
+            if sub.empty:
+                return False, 0.0
+            b1 = sub.iloc[0]
+            if (direction == 1 and b1["low"] <= sl) or (direction == -1 and b1["high"] >= sl):
+                return False, 0.0
+            is_conf = (b1["close"] >= b1["open"]) if direction == 1 else (b1["close"] <= b1["open"])
+            if is_conf:
+                return True, float(b1["close"])
+            if len(sub) > 1:
+                b2 = sub.iloc[1]
+                if (direction == 1 and b2["low"] <= sl) or (direction == -1 and b2["high"] >= sl):
+                    return False, 0.0
+                if (b2["close"] >= b2["open"]) if direction == 1 else (b2["close"] <= b2["open"]):
+                    return True, float(b2["close"])
+        except Exception:
+            pass
+        return False, 0.0
 
     def _build_signal(self, symbol, entry_tf, bias_htf, sub, sig, entry) -> ScanSignal:
         """Convert a strategy Signal (on bar index within ``sub``) to a live one.
@@ -106,6 +134,20 @@ class FVGScanner:
             ts_hour = sig.ts.hour + sig.ts.minute / 60
             if any(lo <= ts_hour < hi for lo, hi in skip):
                 return None
+
+        # HALF A — LTF (M15) confirmation: refine entry price & RR if confirmed
+        ltf_confirmed = False
+        ltf_tf = ""
+        if entry_tf in ("M30", "H1"):
+            is_conf, ltf_fill = self._confirm_ltf_m15(symbol, side, sig.ts, sl)
+            if is_conf and ltf_fill > 0:
+                entry = ltf_fill
+                risk = abs(entry - sl)
+                if risk > 0:
+                    rr = abs(tp - entry) / risk
+                ltf_confirmed = True
+                ltf_tf = "M15"
+
         rd = self.risk.evaluate(symbol, side, entry, sl, tp, now_utc_day=None,
                                 realized_wr=None)
         if not rd.ok:
@@ -118,7 +160,9 @@ class FVGScanner:
             reason=sig.reason, profile=self.profile["name"], bias=bias,
             lots=rd.lots, risk_usd=rd.risk_usd, risk_pct=self.risk.risk_pct,
             messages=rd.messages, confidence=conf, confidence_label=conf_label,
+            ltf_confirmed=ltf_confirmed, ltf_tf=ltf_tf,
         )
+
 
     def _compute_confidence(self, sub, sig, idx, bias_htf) -> tuple[int, str]:
         """0-100 conviction score from confluence at the signal bar:
@@ -209,6 +253,12 @@ class FVGScanner:
                                      bias_htf=bias_htf, bias=-1))
         return out
 
+    def _signaller_for(self, symbol: str):
+        strat = SYMBOL_RUNTIME.get(symbol, {}).get("strategy", "fvg_retest")
+        if strat in candidates.STRATEGIES:
+            return candidates.STRATEGIES[strat].signaller
+        return FVG_SIGNALLER
+
     def scan_symbol(self, symbol: str, entry_tf: str | None = None,
                     bias_htf: str | None = None) -> ScanSignal | None:
         rt = SYMBOL_RUNTIME[symbol]
@@ -217,13 +267,22 @@ class FVGScanner:
         params = dict(self.profile["params"])
         params["bias_htf"] = bias_htf
 
+        strat = rt.get("strategy", "fvg_retest")
+        if strat == "smc_sweep":
+            params["require_bos"] = False
+            params["require_sweep"] = True
+            params["swing_k"] = 2
+            params["min_rr"] = 0.8
+            params["max_rr"] = 2.5
+
         df = get_df(symbol, entry_tf, refresh=True)
         if df is None or len(df) < 300:
             return None
 
         window = min(len(df), 500)
         sub = df.iloc[-window:].copy()
-        sigs = FVG_SIGNALLER(sub, params)
+        signaller = self._signaller_for(symbol)
+        sigs = signaller(sub, params)
 
         last_ts = sub.index[-1]
         hit = next((s for s in sigs if s.ts == last_ts), None)
@@ -248,13 +307,23 @@ class FVGScanner:
         params = dict(self.profile["params"])
         params["bias_htf"] = bias_htf
 
+        strat = rt.get("strategy", "fvg_retest")
+        if strat == "smc_sweep":
+            params["require_bos"] = False
+            params["require_sweep"] = True
+            params["swing_k"] = 2
+            params["min_rr"] = 0.8
+            params["max_rr"] = 2.5
+
         df = get_df(symbol, entry_tf, refresh=True)
         if df is None or len(df) < 300:
             return []
 
         window = min(len(df), 2000)
         sub = df.iloc[-window:].copy()
-        sigs = FVG_SIGNALLER(sub, params)
+        signaller = self._signaller_for(symbol)
+        sigs = signaller(sub, params)
+
 
         out: list[ScanSignal] = []
         last_closed_idx = len(sub) - 2   # last bar may be in progress
@@ -303,9 +372,11 @@ def format_message(sig: ScanSignal, ref: int | None = None) -> str:
     conf_bar = "\u25B0" * n + "\u25B1" * (5 - n) if sig.confidence > 0 else "\u2013"
 
     captured = sig.ts.tz_convert("Africa/Accra").strftime("%a %d %b %H:%M")
+    ltf_tag = f"  \u2022  [{sig.ltf_tf} Confirmed]" if sig.ltf_confirmed else ""
     header = (
         f"{emoji} {sym} \u2014 {d} SETUP"
         + (f"  #{ref:04d}" if ref is not None else "")
+        + ltf_tag
         + f"\nConfidence: {sig.confidence}% {sig.confidence_label}  [{conf_bar}]\n"
         f"{'\u2500' * 26}"
     )

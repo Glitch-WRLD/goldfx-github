@@ -13,7 +13,7 @@ from strategy import indicators as ind
 def htf_bias(df: pd.DataFrame, htf: str = "H1", ema_len: int = 50) -> pd.Series:
     """Resample ``df`` (any intraday TF) to ``htf`` and return a forward-filled
     bias on the low-TF index: +1 close>EMA else -1, 0 during warmup."""
-    rule = {"H1": "1h", "H2": "2h", "H4": "4h"}.get(htf, htf)
+    rule = {"H4": "4h", "H2": "2h", "H1": "1h", "M30": "30min", "M15": "15min", "M5": "5min"}.get(htf, htf)
     h = df.resample(rule).agg(
         {"open": "first", "high": "max", "low": "min", "close": "last"})
     h = h.dropna()
