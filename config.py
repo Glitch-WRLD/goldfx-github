@@ -92,3 +92,8 @@ ROLLOVER_START_UTC = os.getenv("ROLLOVER_START_UTC", "20:55")          # rollove
 ROLLOVER_END_UTC = os.getenv("ROLLOVER_END_UTC", "22:15")              # rollover blackout end time (HH:MM UTC)
 ROLLOVER_MIN_MARGIN_LEVEL_PCT = float(os.getenv("ROLLOVER_MIN_MARGIN_LEVEL_PCT", "250.0"))  # stress test margin %
 CLOSE_IN_PROFIT_BEFORE_ROLLOVER = os.getenv("CLOSE_IN_PROFIT_BEFORE_ROLLOVER", "1") == "1"   # close profitable trades before rollover
+
+# ---- Smart Reversal Early Exit (Asset-Specific: XAUUSD only) ----
+GOLD_REVERSAL_EXIT_ENABLED = os.getenv("GOLD_REVERSAL_EXIT_ENABLED", "1") == "1"
+GOLD_REVERSAL_MIN_MFE_R    = float(os.getenv("GOLD_REVERSAL_MIN_MFE_R", "0.5"))
+GOLD_REVERSAL_TF           = os.getenv("GOLD_REVERSAL_TF", "M15")

@@ -453,7 +453,62 @@ def manage_open_positions(ledger) -> int:
         pos["peak_mfe_r"] = round(peak_mfe, 2)
 
         sl_state = pos.get("sl_state", "initial")
-        # 1. Breakeven protection: activate at >= 0.8R
+
+        # 1. Gold Smart Reversal Early Exit (Asset-Specific: XAUUSD only)
+        # Gold has high mean-reversion whipsaws. If profit reaches >= 0.5R and an opposing M15 reversal
+        # candle confirms against our position, close early to bank profit before a giveback reversal.
+        if symbol == "XAUUSD" and getattr(config, "GOLD_REVERSAL_EXIT_ENABLED", True):
+            min_rev_mfe = float(getattr(config, "GOLD_REVERSAL_MIN_MFE_R", 0.5))
+            if mfe_r >= min_rev_mfe:
+                tf_rev = getattr(config, "GOLD_REVERSAL_TF", "M15")
+                candles = []
+                if hasattr(ex, "get_candles"):
+                    try:
+                        candles = ex.get_candles(symbol, tf=tf_rev, count=3)
+                    except Exception as ce:
+                        log.warning("get_candles error for reversal check ref=%s: %s", ref, ce)
+                if len(candles) >= 2:
+                    cur_bar = candles[-1]
+                    prev_bar = candles[-2]
+                    is_opposing_reversal = False
+                    # Opposing reversal against LONG: strong red candle closing below previous low
+                    if direction == 1 and cur_bar["close"] < cur_bar["open"] and cur_bar["close"] < prev_bar["low"]:
+                        is_opposing_reversal = True
+                    # Opposing reversal against SHORT: strong green candle closing above previous high
+                    elif direction == -1 and cur_bar["close"] > cur_bar["open"] and cur_bar["close"] > prev_bar["high"]:
+                        is_opposing_reversal = True
+
+                    if is_opposing_reversal:
+                        order_id = pos.get("order_id")
+                        lots = float(pos.get("lots", 0.01))
+                        if hasattr(ex, "close_position_by_ticket") and order_id and str(order_id).isdigit():
+                            close_res = ex.close_position_by_ticket(int(order_id))
+                        else:
+                            close_res = ex.close_position(symbol, direction, lots)
+
+                        if close_res and getattr(close_res, "ok", False):
+                            realized_pnl = float(pos.get("risk_usd", 100.0)) * mfe_r
+                            ledger.record_outcome(ref, status="closed", hit="smart_reversal_exit",
+                                                  exit_price=cur, pnl_usd=realized_pnl,
+                                                  classification="gold_smart_reversal_exit")
+                            actions += 1
+                            msg = (
+                                f"\U0001F6E1\uFE0F {symbol} \u2014 SMART REVERSAL PROFIT BANKED"
+                                f"\n{'\u2500' * 26}"
+                                f"\nSetup #{ref} \u00b7 Opposing {tf_rev} reversal structure detected!"
+                                f"\nEarly Exit at {cur:.2f} (Banked +{mfe_r:.2f}R \u00b7 ~${realized_pnl:.2f})"
+                                f"\nAvoided potential Gold liquidity giveback to SL."
+                                f"\nBroker: {pos.get('broker', 'mt5')}"
+                                f"\n{'\u2500' * 26}"
+                                f"\n\U0001F3AF Auto-protected by GoldFX smart agent."
+                            )
+                            if CHAT_ID:
+                                send(CHAT_ID, msg)
+                            log.info("SMART_REVERSAL_EXIT ref=%s %s @ %.2f (Banked +%.2fR / $%.2f)",
+                                     ref, symbol, cur, mfe_r, realized_pnl)
+                            continue
+
+        # 2. Breakeven protection: activate at >= 0.8R (Forex & Gold standard)
         if mfe_r >= 0.8 and sl_state != "be":
             pos["sl_state"] = "be"
             pos["sl_protected"] = fill_price
@@ -478,7 +533,7 @@ def manage_open_positions(ledger) -> int:
             log.info("PROTECTED ref=%s %s SL->BE @ %.5f (peak +%.2fR)",
                      ref, symbol, fill_price, mfe_r)
 
-        # 2. Breakeven exit: if price retraces back to entry after BE activation
+        # 3. Breakeven exit: if price retraces back to entry after BE activation
         elif sl_state == "be":
             hit_be = (direction == 1 and cur <= fill_price) or (direction == -1 and cur >= fill_price)
             if hit_be:
