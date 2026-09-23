@@ -46,11 +46,14 @@ RETRACE_BUFFER_USD = float(os.getenv("RETRACE_BUFFER_USD", "0.50"))             
 RETRACE_MAX_WAIT_HOURS = float(os.getenv("RETRACE_MAX_WAIT_HOURS", "6.0"))       # expire if no entry after 6h
 RETRACE_INVAL_TP_PCT = float(os.getenv("RETRACE_INVAL_TP_PCT", "0.75"))          # cancel if 75% of TP reached before pullback
 
-# ---- Small-Account & Execution Guards ($10 - $100 Accounts) ----
+# ---- Small-Account & Gold Quarantine Guards ($10 - $100 Accounts) ----
+GOLD_QUARANTINE_ENABLED = os.getenv("GOLD_QUARANTINE_ENABLED", "1") == "1"
 MIN_GOLD_BALANCE = float(os.getenv("MIN_GOLD_BALANCE", "100.0"))        # Below $100: Gold must use tight sniper; below $50: Gold quarantined
-MIN_GOLD_ABSOLUTE_BALANCE = float(os.getenv("MIN_GOLD_ABSOLUTE_BALANCE", "50.0")) # Never trade standard Gold below $50 (margin risk)
+MIN_GOLD_ABSOLUTE_BALANCE = float(os.getenv("MIN_GOLD_ABSOLUTE_BALANCE", "50.0")) # Complete quarantine for Gold below $50 (margin risk)
+IS_CENT_ACCOUNT = os.getenv("IS_CENT_ACCOUNT", "0") == "1"              # Set 1 if using a Cent/Micro account (bypasses quarantine)
 MAX_CHASE_TP_PCT = float(os.getenv("MAX_CHASE_TP_PCT", "0.25"))         # Never chase if price already ran >25% towards TP
 MAX_ADVERSE_DRIFT_PCT = float(os.getenv("MAX_ADVERSE_DRIFT_PCT", "0.35"))# Never chase if price ran >35% adverse towards SL
+
 
 
 # ---- Scanner ----

@@ -1008,15 +1008,52 @@ def tick() -> bool:
                                       pnl_usd=0.0, classification="chase_avoided")
                 continue
 
-            # Small Account Safeguard on Gold (XAUUSD)
-            # Below $50 on standard account: margin ($8.60 on 0.01 lot) poses immediate stop-out risk
-            min_gold_abs = float(getattr(config, "MIN_GOLD_ABSOLUTE_BALANCE", 50.0))
-            if symbol == "XAUUSD" and rm.balance < min_gold_abs:
-                log.info("skip XAUUSD ref=%s — balance ($%.2f) below $%.2f minimum for Gold standard margin safety.",
-                         ref_key, rm.balance, min_gold_abs)
-                ledger.record_outcome(ref_key, status="skipped", hit="gold_small_account_margin_cap",
-                                      pnl_usd=0.0, classification="small_account_gold_quarantine")
-                continue
+            # ---- Gold Quarantine & Small Account Capital Shield ----
+            # Standard Gold requires $8.60 margin on 0.01 lot (1:500 leverage).
+            # On a Standard account under $50, this creates immediate stop-out risk on minor drawdowns.
+            # On Cent accounts (where balance is in cents e.g. 1000 USC = $10), Gold is fully permitted.
+            is_cent_account = getattr(config, "IS_CENT_ACCOUNT", False)
+            if not is_cent_account and hasattr(ex, "account_snapshot"):
+                try:
+                    snap = ex.account_snapshot()
+                    acc_curr = str(snap.get("currency", "")).upper()
+                    if "CENT" in acc_curr or "USC" in acc_curr:
+                        is_cent_account = True
+                except Exception:
+                    pass
+
+            if symbol == "XAUUSD" and not is_cent_account and getattr(config, "GOLD_QUARANTINE_ENABLED", True):
+                min_gold_abs = float(getattr(config, "MIN_GOLD_ABSOLUTE_BALANCE", 50.0))
+                min_gold_std = float(getattr(config, "MIN_GOLD_BALANCE", 100.0))
+
+                # Tier 1: Total Quarantine for Standard balances < $50
+                if rm.balance < min_gold_abs:
+                    log.info("🛡️ QUARANTINE XAUUSD ref=%s — balance ($%.2f) below $%.2f minimum for Standard Gold. Forex pairs active.",
+                             ref_key, rm.balance, min_gold_abs)
+                    ledger.record_outcome(ref_key, status="quarantined", hit="gold_quarantined_low_balance",
+                                          pnl_usd=0.0, classification="gold_small_account_quarantine")
+                    msg = (
+                        f"🛡️ XAUUSD — TRADE QUARANTINED (Small Account Protection)"
+                        f"\n{'─' * 26}"
+                        f"\nSetup #{ref_key} · Gold entry blocked"
+                        f"\nAccount Balance: ${rm.balance:.2f} (Below ${min_gold_abs:.0f} standard minimum)"
+                        f"\nReason: Standard Gold requires $8.60 margin on 0.01 lot."
+                        f"\nPreserving capital for safer Forex setups (EUR, GBP, AUD, CAD, NZD, CHF)."
+                        f"\n💡 Tip: To trade Gold with ${rm.balance:.0f}, switch to a Headway Cent Account!"
+                        f"\n{'─' * 26}"
+                    )
+                    if CHAT_ID:
+                        send(CHAT_ID, msg)
+                    continue
+
+                # Tier 2: Balances between $50 and $100 must use M5 Retrace Sniper only
+                if rm.balance < min_gold_std and not getattr(config, "RETRACE_ENABLED", False):
+                    log.info("🛡️ QUARANTINE XAUUSD ref=%s — balance ($%.2f) < $%.2f and retrace sniper disabled. Standard market entry blocked.",
+                             ref_key, rm.balance, min_gold_std)
+                    ledger.record_outcome(ref_key, status="quarantined", hit="gold_standard_entry_quarantined",
+                                          pnl_usd=0.0, classification="gold_requires_sniper")
+                    continue
+
 
             # Dynamic Sizing based on ACTUAL LIVE MARKET PRICE (cur)
             # This guarantees dollar risk NEVER exceeds the 6% budget!
