@@ -46,6 +46,13 @@ RETRACE_BUFFER_USD = float(os.getenv("RETRACE_BUFFER_USD", "0.50"))             
 RETRACE_MAX_WAIT_HOURS = float(os.getenv("RETRACE_MAX_WAIT_HOURS", "6.0"))       # expire if no entry after 6h
 RETRACE_INVAL_TP_PCT = float(os.getenv("RETRACE_INVAL_TP_PCT", "0.75"))          # cancel if 75% of TP reached before pullback
 
+# ---- Small-Account & Execution Guards ($10 - $100 Accounts) ----
+MIN_GOLD_BALANCE = float(os.getenv("MIN_GOLD_BALANCE", "100.0"))        # Below $100: Gold must use tight sniper; below $50: Gold quarantined
+MIN_GOLD_ABSOLUTE_BALANCE = float(os.getenv("MIN_GOLD_ABSOLUTE_BALANCE", "50.0")) # Never trade standard Gold below $50 (margin risk)
+MAX_CHASE_TP_PCT = float(os.getenv("MAX_CHASE_TP_PCT", "0.25"))         # Never chase if price already ran >25% towards TP
+MAX_ADVERSE_DRIFT_PCT = float(os.getenv("MAX_ADVERSE_DRIFT_PCT", "0.35"))# Never chase if price ran >35% adverse towards SL
+
+
 # ---- Scanner ----
 SCAN_INTERVAL_SEC = int(os.getenv("SCAN_INTERVAL_SEC", "150"))  # ~ every 2.5 min
 MIN_TRADES_BEFORE_RESEND_SAME_SETUP = 2

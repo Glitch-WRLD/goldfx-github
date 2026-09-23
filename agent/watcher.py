@@ -430,7 +430,25 @@ def manage_open_positions(ledger) -> int:
 
     ex = get_executor()
     actions = 0
+
+    # Query active broker positions to auto-reconcile manually closed or broker-closed tickets
+    active_broker_tickets = None
+    if hasattr(ex, "get_open_positions"):
+        try:
+            bps = ex.get_open_positions()
+            active_broker_tickets = {str(p["ticket"]) for p in bps} if bps is not None else None
+        except Exception as be:
+            log.debug("get_open_positions check failed: %s", be)
+
     for ref, pos in open_trades:
+        order_id = pos.get("order_id")
+        if active_broker_tickets is not None and order_id and str(order_id).isdigit():
+            if str(order_id) not in active_broker_tickets:
+                log.info("RECONCILE: ref=%s ticket=%s already closed in MT5. Marking closed.", ref, order_id)
+                ledger.record_outcome(ref, status="closed", hit="broker_exit", exit_price=pos.get("fill_price", 0.0), pnl_usd=0.0, classification="broker_closed")
+                actions += 1
+                continue
+
         symbol = pos.get("symbol")
         direction = int(pos.get("direction", 1))
         fill_price = float(pos.get("fill_price", 0.0))
@@ -439,6 +457,7 @@ def manage_open_positions(ledger) -> int:
         risk = abs(fill_price - sl)
         if not (symbol and fill_price and sl and risk > 0):
             continue
+
 
         try:
             cur = ex.current_price(symbol) if hasattr(ex, "current_price") else 0.0
@@ -919,90 +938,14 @@ def tick() -> bool:
                                   pnl_usd=0.0, classification=f"already_concluded_{hit_type}")
             continue
 
-        sl_dist = abs(entry_price - sl)
-        risk_usd = rm.balance * rm.risk_pct / 100.0
-        lots_raw = position_size(symbol, risk_usd, sl_dist)
-        lots = floor_lots(symbol, lots_raw)
-        if lots < 0.01:
-            c = config.CONTRACTS.get(symbol, {})
-            min_risk = 0.01 * (sl_dist / c.get("point", 0.01)) * c.get("pip_value_per_lot_usd", 1.0)
-            if symbol == "XAUUSD" and getattr(config, "RETRACE_ENABLED", False):
-                pending_retrace = _load_pending_retrace()
-                if str(ref_key) not in pending_retrace:
-                    tp_75 = entry_price + (tp - entry_price) * getattr(config, "RETRACE_INVAL_TP_PCT", 0.75)
-                    pb_thresh = entry_price - direction * (sl_dist * getattr(config, "RETRACE_MIN_PULLBACK_PCT", 0.25))
-                    pending_retrace[str(ref_key)] = {
-                        "ref": ref_key,
-                        "symbol": symbol,
-                        "direction": direction,
-                        "entry_delivered": entry_price,
-                        "sl_orig": sl,
-                        "tp": tp,
-                        "orig_risk": sl_dist,
-                        "orig_rr": rr,
-                        "signal_ts": signal_ts,
-                        "first_seen_ts": time.time(),
-                        "tp_75": tp_75,
-                        "pullback_min_dist": pb_thresh,
-                        "had_pullback": False,
-                        "profile": entry.get("profile", ""),
-                        "label": f"goldfx #{ref_key}" if str(ref_key).isdigit() else f"goldfx {ref_key}",
-                    }
-                    _save_pending_retrace(pending_retrace)
-                    log.info("ENQUEUED_RETRACE %s ref=%s — waiting for M5 pullback (SL dist $%.2f > $%.2f risk budget)",
-                             symbol, ref_key, sl_dist, risk_usd)
-                    d_str = "LONG" if direction == 1 else "SHORT"
-                    msg = (
-                        f"\U0001F7E1 {symbol} \u2014 PENDING M5 PULLBACK SNIPER"
-                        f"\n{'\u2500' * 26}"
-                        f"\nSetup #{ref_key} \u00b7 {d_str} @ {entry_price:.2f}"
-                        f"\nStandard SL distance (${sl_dist:.2f}) exceeds our ${risk_usd:.2f} risk budget (6%)."
-                        f"\nBot will wait for 25%–50% pullback + local M5 reversal structure to enter safely."
-                        f"\n{'\u2500' * 26}"
-                        f"\n\u26A0\ufe0f Capital preservation guard active."
-                    )
-                    if CHAT_ID:
-                        send(CHAT_ID, msg)
-                continue
-            log.info("skip %s ref=%s — required lot (%.4f) < broker min (0.01). Min lot would risk $%.2f (%.1f%% of balance), exceeding our %.1f%% budget ($%.2f). Capital preserved.",
-                     symbol, ref_key, lots_raw, min_risk, (min_risk / rm.balance) * 100, rm.risk_pct, risk_usd)
+        # Rollover Blackout Check (e.g. 20:55 - 22:15 UTC)
+        if _is_rollover_blackout():
+            log.info("skip %s ref=%s — rollover blackout active (%s - %s UTC). New entries paused.",
+                     symbol, ref_key, getattr(config, "ROLLOVER_START_UTC", "20:55"), getattr(config, "ROLLOVER_END_UTC", "22:15"))
             continue
-        label = f"goldfx #{ref_key}" if str(ref_key).isdigit() else f"goldfx {ref_key}"
+
         try:
             ex = get_executor()
-            # HALF A — Price & SL Sanity guard:
-            cur = ex.current_price(symbol) if hasattr(ex, "current_price") else 0.0
-            if cur:
-                # Never fire a setup whose SL is already breached
-                if (direction == 1 and cur <= sl) or (direction == -1 and cur >= sl):
-                    log.info("skip %s ref=%s — SL already breached (cur %.5f, sl %.5f)",
-                             symbol, ref_key, cur, sl)
-                    ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_sl_breached",
-                                          pnl_usd=0.0, classification="sl_already_breached")
-                    continue
-                # Never fire if price already reached TP
-                if (direction == 1 and cur >= tp) or (direction == -1 and cur <= tp):
-                    log.info("skip %s ref=%s — TP already reached (cur %.5f, tp %.5f)",
-                             symbol, ref_key, cur, tp)
-                    ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_tp_reached",
-                                          pnl_usd=0.0, classification="tp_already_reached")
-                    continue
-                # Never chase if price has moved too far adverse towards SL beyond entry zone
-                # LONG (direction=1): adverse is downward towards SL (cur < entry - 0.35 * sl_dist)
-                # SHORT (direction=-1): adverse is upward towards SL (cur > entry + 0.35 * sl_dist)
-                if (direction == 1 and cur < entry_price - 0.35 * sl_dist) or \
-                   (direction == -1 and cur > entry_price + 0.35 * sl_dist):
-                    log.info("skip %s ref=%s — price ran too far from entry zone (cur %.5f, entry %.5f)",
-                             symbol, ref_key, cur, entry_price)
-                    ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_adverse_drift",
-                                          pnl_usd=0.0, classification="adverse_drift_exceeded")
-                    continue
-
-            # Rollover Blackout Check (e.g. 20:55 - 22:15 UTC)
-            if _is_rollover_blackout():
-                log.info("skip %s ref=%s — rollover blackout active (%s - %s UTC). New entries paused.",
-                         symbol, ref_key, getattr(config, "ROLLOVER_START_UTC", "20:55"), getattr(config, "ROLLOVER_END_UTC", "22:15"))
-                continue
 
             # Spread Filter Check
             if hasattr(ex, "get_spread"):
@@ -1021,7 +964,124 @@ def tick() -> bool:
                              symbol, ref_key, curr_metric, metric_unit, max_spread, metric_unit)
                     continue
 
-            fill = ex.place_market_order(symbol, direction, lots, entry_price, sl, tp, label)
+            # Fetch LIVE price first for pre-entry sanity and accurate dynamic sizing
+            cur = ex.current_price(symbol) if hasattr(ex, "current_price") else 0.0
+            if not cur or cur <= 0:
+                cur = entry_price
+
+            # Check A: Never fire a setup whose SL is already breached
+            if (direction == 1 and cur <= sl) or (direction == -1 and cur >= sl):
+                log.info("skip %s ref=%s — SL already breached (cur %.5f, sl %.5f)",
+                         symbol, ref_key, cur, sl)
+                ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_sl_breached",
+                                      pnl_usd=0.0, classification="sl_already_breached")
+                continue
+
+            # Check B: Never fire if price already reached TP
+            if (direction == 1 and cur >= tp) or (direction == -1 and cur <= tp):
+                log.info("skip %s ref=%s — TP already reached (cur %.5f, tp %.5f)",
+                         symbol, ref_key, cur, tp)
+                ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_tp_reached",
+                                      pnl_usd=0.0, classification="tp_already_reached")
+                continue
+
+            orig_sl_dist = abs(entry_price - sl)
+            orig_tp_dist = abs(tp - entry_price)
+
+            # Check C: Adverse drift check (price fell too far towards SL)
+            max_adverse_pct = float(getattr(config, "MAX_ADVERSE_DRIFT_PCT", 0.35))
+            if (direction == 1 and cur < entry_price - max_adverse_pct * orig_sl_dist) or \
+               (direction == -1 and cur > entry_price + max_adverse_pct * orig_sl_dist):
+                log.info("skip %s ref=%s — price drifted too far adverse from entry zone (cur %.5f, entry %.5f)",
+                         symbol, ref_key, cur, entry_price)
+                ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_adverse_drift",
+                                      pnl_usd=0.0, classification="adverse_drift_exceeded")
+                continue
+
+            # Check D: Anti-Chase Guard (price already ran >25% towards TP)
+            max_chase_pct = float(getattr(config, "MAX_CHASE_TP_PCT", 0.25))
+            if (direction == 1 and cur > entry_price + max_chase_pct * orig_tp_dist) or \
+               (direction == -1 and cur < entry_price - max_chase_pct * orig_tp_dist):
+                log.info("skip %s ref=%s — anti-chase guard: price already ran >%.0f%% towards TP (cur %.5f, entry %.5f, tp %.5f)",
+                         symbol, ref_key, max_chase_pct * 100, cur, entry_price, tp)
+                ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_chase_avoided",
+                                      pnl_usd=0.0, classification="chase_avoided")
+                continue
+
+            # Small Account Safeguard on Gold (XAUUSD)
+            # Below $50 on standard account: margin ($8.60 on 0.01 lot) poses immediate stop-out risk
+            min_gold_abs = float(getattr(config, "MIN_GOLD_ABSOLUTE_BALANCE", 50.0))
+            if symbol == "XAUUSD" and rm.balance < min_gold_abs:
+                log.info("skip XAUUSD ref=%s — balance ($%.2f) below $%.2f minimum for Gold standard margin safety.",
+                         ref_key, rm.balance, min_gold_abs)
+                ledger.record_outcome(ref_key, status="skipped", hit="gold_small_account_margin_cap",
+                                      pnl_usd=0.0, classification="small_account_gold_quarantine")
+                continue
+
+            # Dynamic Sizing based on ACTUAL LIVE MARKET PRICE (cur)
+            # This guarantees dollar risk NEVER exceeds the 6% budget!
+            actual_sl_dist = abs(cur - sl)
+            actual_tp_dist = abs(tp - cur)
+            if actual_sl_dist <= 0:
+                continue
+            actual_rr = actual_tp_dist / actual_sl_dist
+            if actual_rr < 0.60:
+                log.info("skip %s ref=%s — live RR %.2f too low from current market price (cur %.5f, sl %.5f, tp %.5f)",
+                         symbol, ref_key, actual_rr, cur, sl, tp)
+                continue
+
+            risk_usd = rm.balance * rm.risk_pct / 100.0
+            lots_raw = position_size(symbol, risk_usd, actual_sl_dist)
+            lots = floor_lots(symbol, lots_raw)
+
+            if lots < 0.01:
+                c = config.CONTRACTS.get(symbol, {})
+                min_risk = 0.01 * (actual_sl_dist / c.get("point", 0.01)) * c.get("pip_value_per_lot_usd", 1.0)
+                if symbol == "XAUUSD" and getattr(config, "RETRACE_ENABLED", False):
+                    pending_retrace = _load_pending_retrace()
+                    if str(ref_key) not in pending_retrace:
+                        tp_75 = entry_price + (tp - entry_price) * getattr(config, "RETRACE_INVAL_TP_PCT", 0.75)
+                        pb_thresh = entry_price - direction * (orig_sl_dist * getattr(config, "RETRACE_MIN_PULLBACK_PCT", 0.25))
+                        pending_retrace[str(ref_key)] = {
+                            "ref": ref_key,
+                            "symbol": symbol,
+                            "direction": direction,
+                            "entry_delivered": entry_price,
+                            "sl_orig": sl,
+                            "tp": tp,
+                            "orig_risk": actual_sl_dist,
+                            "orig_rr": rr,
+                            "signal_ts": signal_ts,
+                            "first_seen_ts": time.time(),
+                            "tp_75": tp_75,
+                            "pullback_min_dist": pb_thresh,
+                            "had_pullback": False,
+                            "profile": entry.get("profile", ""),
+                            "label": f"goldfx #{ref_key}" if str(ref_key).isdigit() else f"goldfx {ref_key}",
+                        }
+                        _save_pending_retrace(pending_retrace)
+                        log.info("ENQUEUED_RETRACE %s ref=%s — waiting for M5 pullback (live SL dist $%.2f > $%.2f risk budget)",
+                                 symbol, ref_key, actual_sl_dist, risk_usd)
+                        d_str = "LONG" if direction == 1 else "SHORT"
+                        msg = (
+                            f"\U0001F7E1 {symbol} \u2014 PENDING M5 PULLBACK SNIPER"
+                            f"\n{'\u2500' * 26}"
+                            f"\nSetup #{ref_key} \u00b7 {d_str} @ {cur:.2f}"
+                            f"\nLive SL distance (${actual_sl_dist:.2f}) exceeds our ${risk_usd:.2f} risk budget ({rm.risk_pct}%)."
+                            f"\nBot will wait for 25%–50% pullback + local M5 reversal structure to enter safely."
+                            f"\n{'\u2500' * 26}"
+                            f"\n\u26A0\ufe0f Capital preservation guard active."
+                        )
+                        if CHAT_ID:
+                            send(CHAT_ID, msg)
+                    continue
+                log.info("skip %s ref=%s — required lot (%.4f) < broker min (0.01). Min lot would risk $%.2f (%.1f%% of balance), exceeding our %.1f%% budget ($%.2f). Capital preserved.",
+                         symbol, ref_key, lots_raw, min_risk, (min_risk / rm.balance) * 100, rm.risk_pct, risk_usd)
+                continue
+
+            label = f"goldfx #{ref_key}" if str(ref_key).isdigit() else f"goldfx {ref_key}"
+            fill = ex.place_market_order(symbol, direction, lots, cur, sl, tp, label)
+
         except Exception as e:
             log.error("execution failed for ref=%s: %s", ref_key, e)
             continue
@@ -1038,8 +1098,8 @@ def tick() -> bool:
             "entry_delivered": entry_price,
             "sl": sl,
             "tp": tp,
-            "rr": rr,
-            "risk_usd": risk_usd,
+            "rr": round(actual_rr, 2),
+            "risk_usd": round(risk_usd, 2),
             "order_id": fill.order_id,
             "broker": fill.broker,
             "ts": fill.ts,
