@@ -84,9 +84,12 @@ AGENT_STATE_URL = os.getenv(
     "https://raw.githubusercontent.com/Glitch-WRLD/goldfx-github/main/gha_state/state.json",
 )
 
-# ---- Portfolio Exposure & Rollover Protection ----
-MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", "2"))   # max concurrent open trades
-MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.5"))           # max FX spread (pips) for market entry
+# ---- Portfolio Exposure & Risk Budgeting ----
+MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", "4"))         # max concurrent open trades across all pairs
+MAX_TRADES_PER_SYMBOL = int(os.getenv("MAX_TRADES_PER_SYMBOL", "2"))         # max concurrent trades on single symbol
+MAX_PORTFOLIO_RISK_PCT = float(os.getenv("MAX_PORTFOLIO_RISK_PCT", "18.0"))  # max cumulative unprotected risk %
+LOCAL_TP_GUARD_ENABLED = os.getenv("LOCAL_TP_GUARD_ENABLED", "1") == "1"     # close immediately if chart price touches TP
+MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.5"))                 # max FX spread (pips) for market entry
 MAX_SPREAD_GOLD = float(os.getenv("MAX_SPREAD_GOLD", "1.50"))          # max XAUUSD spread ($) for market entry
 ROLLOVER_START_UTC = os.getenv("ROLLOVER_START_UTC", "20:55")          # rollover blackout start time (HH:MM UTC)
 ROLLOVER_END_UTC = os.getenv("ROLLOVER_END_UTC", "22:15")              # rollover blackout end time (HH:MM UTC)

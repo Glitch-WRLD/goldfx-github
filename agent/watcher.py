@@ -452,6 +452,40 @@ def manage_open_positions(ledger) -> int:
         peak_mfe = max(float(pos.get("peak_mfe_r", 0.0)), mfe_r)
         pos["peak_mfe_r"] = round(peak_mfe, 2)
 
+        # 0. Local TP Guard (Spread-Proof Take Profit Execution)
+        # If market price reached or passed TP, close immediately to prevent missing TP due to Ask/Bid spread hover
+        if getattr(config, "LOCAL_TP_GUARD_ENABLED", True):
+            is_at_or_past_tp = (direction == 1 and cur >= tp) or (direction == -1 and cur <= tp)
+            if is_at_or_past_tp:
+                order_id = pos.get("order_id")
+                lots = float(pos.get("lots", 0.01))
+                rr = float(pos.get("rr", 0.0))
+                log.info("LOCAL_TP_GUARD_TRIGGER ref=%s %s touched TP (cur=%.5f, tp=%.5f). Market-closing to bank TP.",
+                         ref, symbol, cur, tp)
+                if hasattr(ex, "close_position_by_ticket") and order_id and str(order_id).isdigit():
+                    close_res = ex.close_position_by_ticket(int(order_id))
+                else:
+                    close_res = ex.close_position(symbol, direction, lots)
+
+                if close_res and getattr(close_res, "ok", False):
+                    profit_usd = float(pos.get("risk_usd", 100.0)) * rr if rr else 0.0
+                    ledger.record_outcome(ref, status="closed", hit="tp", exit_price=cur,
+                                          pnl_usd=profit_usd, classification="local_tp_guard")
+                    actions += 1
+                    msg = (
+                        f"🎯 {symbol} — TAKE-PROFIT HIT (LOCAL TP GUARD)"
+                        f"\n{'─' * 26}"
+                        f"\nSetup #{ref} · Target reached at {cur:.5f} (TP: {tp:.5f})"
+                        f"\nProfit: +{rr:.2f}R · ~${profit_usd:.2f} USD"
+                        f"\nSpread-Proof Guard: Closed instantly at market."
+                        f"\nBroker: {pos.get('broker', 'mt5')}"
+                        f"\n{'─' * 26}"
+                        f"\n🏆 Executed by GoldFX agent."
+                    )
+                    if CHAT_ID:
+                        send(CHAT_ID, msg)
+                    continue
+
         sl_state = pos.get("sl_state", "initial")
 
         # 1. Gold Smart Reversal Early Exit (Asset-Specific: XAUUSD only)
@@ -821,13 +855,17 @@ def tick() -> bool:
 
     fired_any = False
 
-    # Defense 1: Cap concurrent active trades across the portfolio
-    max_trades = int(getattr(config, "MAX_CONCURRENT_TRADES", 2))
+    # Defense 1: Portfolio Risk Budgeting & Capacity Guard
+    max_trades = int(getattr(config, "MAX_CONCURRENT_TRADES", 4))
+    max_trades_per_sym = int(getattr(config, "MAX_TRADES_PER_SYMBOL", 2))
+    max_portfolio_risk_pct = float(getattr(config, "MAX_PORTFOLIO_RISK_PCT", 18.0))
+
     target_broker = getattr(ex, "broker", "mt5")
-    active_open_count = len([
+    open_positions = [
         e for e in ledger.open_entries().values()
         if e.get("broker", "mt5") == target_broker
-    ])
+    ]
+    active_open_count = len(open_positions)
 
     # 1. Execute new setups (oldest first for correct sequence)
     for entry in reversed(history):
@@ -837,9 +875,28 @@ def tick() -> bool:
         symbol = entry.get("symbol", "")
         direction = _entry_dir(entry)
 
+        # Check 1: Max concurrent open trades across all pairs
         if active_open_count >= max_trades:
             log.info("skip %s ref=%s — max concurrent trades reached (%d/%d active)",
                      symbol, ref_key, active_open_count, max_trades)
+            continue
+
+        # Check 2: Max concurrent trades on this specific symbol
+        sym_open_count = len([e for e in open_positions if e.get("symbol") == symbol])
+        if sym_open_count >= max_trades_per_sym:
+            log.info("skip %s ref=%s — symbol concentration limit reached (%d/%d on %s)",
+                     symbol, ref_key, sym_open_count, max_trades_per_sym, symbol)
+            continue
+
+        # Check 3: Cumulative portfolio unprotected risk (trades at Breakeven have $0 risk!)
+        unprotected_risk_usd = sum(
+            float(e.get("risk_usd", 0.0)) for e in open_positions
+            if e.get("sl_state") != "be"
+        )
+        current_unprotected_risk_pct = (unprotected_risk_usd / rm.balance * 100.0) if rm.balance > 0 else 0.0
+        if current_unprotected_risk_pct + rm.risk_pct > max_portfolio_risk_pct:
+            log.info("skip %s ref=%s — portfolio risk limit reached (open risk %.1f%% + new %.1f%% > max %.1f%%)",
+                     symbol, ref_key, current_unprotected_risk_pct, rm.risk_pct, max_portfolio_risk_pct)
             continue
 
         entry_price = float(entry.get("entry", 0))
@@ -1002,6 +1059,7 @@ def tick() -> bool:
                  fill.fill_price, lots)
         fired_any = True
         active_open_count += 1
+        open_positions.append(ledger.data[str(ref_key)])
 
 
     # 2. Process pending retracements (Option 1: M5 Swing Sniper for Gold)
