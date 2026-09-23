@@ -9,6 +9,9 @@ __pycache__/
 # local runtime artifacts (local bot state; GHA keeps its state in gha_state/)
 bot.log
 bot_state.json
+agent/ledger.json
+*.png
+*.bmp
 
 # heavy / regenerable data
 data_cache/
@@ -16,4 +19,4 @@ reports/*.json
 reports/*.md
 
 # misc
-.DS_Store
+.DS_Store

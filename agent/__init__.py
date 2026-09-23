@@ -1,0 +1,1 @@
+"""GoldFX auto-trading agent package."""
