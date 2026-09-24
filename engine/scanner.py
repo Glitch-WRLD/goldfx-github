@@ -151,7 +151,13 @@ class FVGScanner:
                 ltf_confirmed = True
                 ltf_tf = "M15"
 
+        # Hard R:R Floor: Never deliver or trade setups with sub-standard R:R (< 0.60)
+        min_rr_floor = max(0.60, float(params.get("min_rr_post", 0.50)))
+        if rr < min_rr_floor:
+            return None
+
         rd = self.risk.evaluate(symbol, side, entry, sl, tp, now_utc_day=None,
+
                                 realized_wr=None)
         if not rd.ok:
             return None
@@ -454,9 +460,10 @@ def format_message(sig: ScanSignal, ref: int | None = None) -> str:
         f"\n\U0001F6D1 Stop-loss    {sl}   (risk {sig.risk_pct:.1f}%)"
         f"\n\U0001F3AF Take-profit  {tp}   (R:R 1 : {sig.rr:.2f})\n"
         f"{'\u2500' * 26}\n"
-        f"\U0001F4CA {sig.reason} \u00b7 {sig.entry_tf} setup, {sig.bias_htf} bias\n"
-        f"\U0001F4F7 Captured {captured} (Accra time)\n"
+        f"📊 {sig.reason} · {sig.entry_tf} setup, {sig.bias_htf} bias\n"
+        f"🕐 Candle Open: {captured} (Accra / GMT)\n"
     )
+
     if sig.lots > 0:
         riskline = (f"\U0001F4B5 Risk {sig.risk_usd:.2f} USD ({sig.risk_pct:.1f}%) "
                     f"\u00b7 Size {sig.lots:.2f} lots")
