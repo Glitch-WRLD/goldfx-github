@@ -722,13 +722,13 @@ def process_pending_retracements(ledger) -> int:
             still_pending[ref_key] = item
             continue
 
-        # E. Look for M5 reversal structure
+        # E. Look for M5 reversal structure across all pairs
         candles = []
         if hasattr(ex, "get_candles"):
             try:
                 candles = ex.get_candles(symbol, tf="M5", count=4)
             except Exception as ce:
-                log.warning("get_candles error ref=%s: %s", ref_key, ce)
+                log.warning("get_candles error ref=%s %s: %s", ref_key, symbol, ce)
 
         if len(candles) < 2:
             still_pending[ref_key] = item
@@ -738,40 +738,70 @@ def process_pending_retracements(ledger) -> int:
         cur_bar = candles[-1]
         prev_bar = candles[-2]
 
+        c_info = config.CONTRACTS.get(symbol, {})
+        point = float(c_info.get("point", 0.00001))
+        digits = int(c_info.get("digits", 5))
+        pip_val = float(c_info.get("pip_value_per_lot_usd", 1.0))
+        buffer_val = float(getattr(config, "RETRACE_BUFFER_USD", 0.50)) if symbol == "XAUUSD" else (point * 15 if digits in (4, 5) else point * 2)
+
         is_reversal = False
         candidate_sl = None
-        buffer_usd = float(getattr(config, "RETRACE_BUFFER_USD", 0.50))
 
         if direction == 1:
-            # Bullish reversal: close > open AND close >= prev_bar high
-            if cur_bar["close"] > cur_bar["open"] and cur_bar["close"] >= prev_bar["high"]:
+            # Bullish reversal: Bullish engulfing OR hammer pinbar rejection
+            is_bull_engulf = (cur_bar["close"] > cur_bar["open"] and cur_bar["close"] >= prev_bar["high"])
+            c_range = cur_bar["high"] - cur_bar["low"]
+            lower_wick = min(cur_bar["open"], cur_bar["close"]) - cur_bar["low"]
+            is_bull_pin = (c_range > 0 and lower_wick / c_range >= 0.45 and cur_bar["close"] >= cur_bar["open"])
+            if is_bull_engulf or is_bull_pin:
                 is_reversal = True
-                candidate_sl = min(cur_bar["low"], prev_bar["low"]) - buffer_usd
+                candidate_sl = min(cur_bar["low"], prev_bar["low"]) - buffer_val
         else:
-            # Bearish reversal: close < open AND close <= prev_bar low
-            if cur_bar["close"] < cur_bar["open"] and cur_bar["close"] <= prev_bar["low"]:
+            # Bearish reversal: Bearish engulfing OR shooting star pinbar rejection
+            is_bear_engulf = (cur_bar["close"] < cur_bar["open"] and cur_bar["close"] <= prev_bar["low"])
+            c_range = cur_bar["high"] - cur_bar["low"]
+            upper_wick = cur_bar["high"] - max(cur_bar["open"], cur_bar["close"])
+            is_bear_pin = (c_range > 0 and upper_wick / c_range >= 0.45 and cur_bar["close"] <= cur_bar["open"])
+            if is_bear_engulf or is_bear_pin:
                 is_reversal = True
-                candidate_sl = max(cur_bar["high"], prev_bar["high"]) + buffer_usd
+                candidate_sl = max(cur_bar["high"], prev_bar["high"]) + buffer_val
 
         if not is_reversal or candidate_sl is None:
             still_pending[ref_key] = item
             continue
 
-        # Calculate risk with the new local swing stop
-        candidate_risk = abs(cur_bar["close"] - candidate_sl)
-        max_allowed = float(getattr(config, "RETRACE_MAX_RISK_USD", 7.50))
+        # Calculate stop distance with the new local swing stop
+        candidate_sl_dist = abs(cur_bar["close"] - candidate_sl)
+        min_stop_dist = point * 25 if symbol != "XAUUSD" else 1.00
+        if candidate_sl_dist < min_stop_dist:
+            candidate_sl_dist = min_stop_dist
+            candidate_sl = cur_bar["close"] - min_stop_dist if direction == 1 else cur_bar["close"] + min_stop_dist
 
-        if candidate_risk > max_allowed or candidate_risk < 1.50:
-            log.info("RETRACE_SKIP_BAR ref=%s candidate risk $%.2f outside [$1.50, $%.2f] bounds",
-                     ref_key, candidate_risk, max_allowed)
+        # Dynamic Lot Sizing based on portfolio risk budget (6%)
+        risk_usd = rm.balance * rm.risk_pct / 100.0
+        lots_raw = position_size(symbol, risk_usd, candidate_sl_dist)
+        lots = floor_lots(symbol, lots_raw)
+        min_lot = float(c_info.get("min_lot", 0.01))
+
+        if lots < min_lot:
+            min_risk = min_lot * (candidate_sl_dist / point) * pip_val
+            max_allowed = float(getattr(config, "RETRACE_MAX_RISK_USD", 7.50))
+            if rm.balance < 150.0 and min_risk > max_allowed:
+                log.info("RETRACE_SKIP_BAR ref=%s %s min lot risk $%.2f exceeds small account cap $%.2f",
+                         ref_key, symbol, min_risk, max_allowed)
+                still_pending[ref_key] = item
+                continue
+            lots = min_lot
+
+        fill_entry = cur_bar["close"]
+        sniper_reward = abs(tp - fill_entry)
+        sniper_rr = sniper_reward / candidate_sl_dist if candidate_sl_dist > 0 else 1.0
+        if sniper_rr < 0.70:
+            log.info("RETRACE_SKIP_BAR ref=%s %s sniper RR %.2f < 0.70 floor", ref_key, symbol, sniper_rr)
             still_pending[ref_key] = item
             continue
 
-        # RISK IS WITHIN BUDGET! Fire 0.01 lot order!
-        lots = 0.01
-        fill_entry = cur_bar["close"]
-        sniper_reward = abs(tp - fill_entry)
-        sniper_rr = sniper_reward / candidate_risk if candidate_risk > 0 else 1.0
+        dollar_risk = lots * (candidate_sl_dist / point) * pip_val
 
         try:
             fill = ex.place_market_order(symbol, direction, lots, fill_entry, candidate_sl, tp, label)
@@ -786,6 +816,7 @@ def process_pending_retracements(ledger) -> int:
             continue
 
         # Record in ledger!
+        fmt_digits = 2 if symbol == "XAUUSD" else digits
         ledger.data[str(ref_key)] = {
             "ref": ref_key,
             "symbol": symbol,
@@ -797,7 +828,7 @@ def process_pending_retracements(ledger) -> int:
             "orig_sl": sl_orig,
             "tp": tp,
             "rr": round(sniper_rr, 2),
-            "risk_usd": round(candidate_risk * 1.0, 2),
+            "risk_usd": round(dollar_risk, 2),
             "order_id": fill.order_id,
             "broker": fill.broker,
             "ts": fill.ts,
@@ -813,23 +844,23 @@ def process_pending_retracements(ledger) -> int:
 
         # Format Telegram announcement
         d_str = "LONG" if direction == 1 else "SHORT"
-        emoji = "\U0001F7E2" if direction == 1 else "\U0001F534"
+        emoji = "🟢" if direction == 1 else "🔴"
         orig_dist = abs(entry_delivered - sl_orig)
         msg = (
-            f"{emoji} {symbol} \u2014 SNIPER M5 PULLBACK FILLED {d_str}"
-            f"\n{'\u2500' * 26}"
-            f"\nSetup #{ref_key} \u00b7 Fill: {fill.fill_price:.2f} \u00b7 {lots:.2f} lots"
-            f"\nNew SL: {candidate_sl:.2f} (Local M5 Swing \u00b7 Risk: ${candidate_risk:.2f})"
-            f"\nTP: {tp:.2f} \u00b7 Sniper R:R: 1:{sniper_rr:.2f}"
-            f"\nOriginal Stop was ${orig_dist:.2f} ($25+ Risk)."
-            f"\nBroker: {fill.broker} \u00b7 {fill.ts}"
-            f"\n{'\u2500' * 26}"
-            f"\n\U0001F3AF Executed via GoldFX M5 Swing Sniper."
+            f"{emoji} {symbol} — SNIPER M5 MICRO-SHIFT FILLED {d_str}\n"
+            f"{'─' * 26}\n"
+            f"Setup #{ref_key} · Fill: {fill.fill_price:.{fmt_digits}f} · {lots:.2f} lots\n"
+            f"New SL: {candidate_sl:.{fmt_digits}f} (Local M5 Swing · Risk: ${dollar_risk:.2f})\n"
+            f"TP: {tp:.{fmt_digits}f} · Sniper R:R: 1:{sniper_rr:.2f}\n"
+            f"Original Stop Distance was {orig_dist:.{fmt_digits}f}\n"
+            f"Broker: {fill.broker} · {fill.ts}\n"
+            f"{'─' * 26}\n"
+            f"🎯 Executed via GoldFX M5 Micro-Shift Engine."
         )
         if CHAT_ID:
             send(CHAT_ID, msg)
-        log.info("SNIPER_FILLED ref=%s %s %s @ %.2f (SL %.2f, Risk $%.2f, RR 1:%.2f)",
-                 ref_key, symbol, d_str, fill.fill_price, candidate_sl, candidate_risk, sniper_rr)
+        log.info("SNIPER_FILLED ref=%s %s %s @ %.5f (SL %.5f, Risk $%.2f, RR 1:%.2f)",
+                 ref_key, symbol, d_str, fill.fill_price, candidate_sl, dollar_risk, sniper_rr)
         filled_count += 1
 
     _save_pending_retrace(still_pending)
@@ -1004,8 +1035,47 @@ def tick() -> bool:
                (direction == -1 and cur < entry_price - max_chase_pct * orig_tp_dist):
                 log.info("skip %s ref=%s — anti-chase guard: price already ran >%.0f%% towards TP (cur %.5f, entry %.5f, tp %.5f)",
                          symbol, ref_key, max_chase_pct * 100, cur, entry_price, tp)
-                ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_chase_avoided",
-                                      pnl_usd=0.0, classification="chase_avoided")
+                if getattr(config, "RETRACE_ENABLED", True):
+                    pending_retrace = _load_pending_retrace()
+                    if str(ref_key) not in pending_retrace:
+                        tp_75 = entry_price + (tp - entry_price) * getattr(config, "RETRACE_INVAL_TP_PCT", 0.75)
+                        pb_thresh = entry_price
+                        pending_retrace[str(ref_key)] = {
+                            "ref": ref_key,
+                            "symbol": symbol,
+                            "direction": direction,
+                            "entry_delivered": entry_price,
+                            "sl_orig": sl,
+                            "tp": tp,
+                            "orig_risk": orig_sl_dist,
+                            "orig_rr": rr,
+                            "signal_ts": signal_ts,
+                            "first_seen_ts": time.time(),
+                            "tp_75": tp_75,
+                            "pullback_min_dist": pb_thresh,
+                            "had_pullback": False,
+                            "profile": entry.get("profile", ""),
+                            "label": f"goldfx #{ref_key}" if str(ref_key).isdigit() else f"goldfx {ref_key}",
+                        }
+                        _save_pending_retrace(pending_retrace)
+                        d_str = "LONG" if direction == 1 else "SHORT"
+                        digits_fmt = 2 if symbol == "XAUUSD" else config.CONTRACTS.get(symbol, {}).get("digits", 5)
+                        msg = (
+                            f"🟡 {symbol} — PENDING M5 PULLBACK SNIPER {d_str}\n"
+                            f"{'─' * 26}\n"
+                            f"Setup #{ref_key} · {d_str} @ {cur:.{digits_fmt}f}\n"
+                            f"Price ran >{max_chase_pct*100:.0f}% towards TP ({cur:.{digits_fmt}f} vs {entry_price:.{digits_fmt}f}).\n"
+                            f"Anti-Chase active: Bot will wait for M5 pullback to entry zone ({entry_price:.{digits_fmt}f}) + M5 reversal structure to enter safely.\n"
+                            f"{'─' * 26}\n"
+                            f"🛡️ Capital preservation & entry optimization active."
+                        )
+                        if CHAT_ID:
+                            send(CHAT_ID, msg)
+                        log.info("ENQUEUED_RETRACE %s ref=%s — price ran >%.0f%% towards TP; waiting for M5 pullback to entry zone %.5f",
+                                 symbol, ref_key, max_chase_pct * 100, pb_thresh)
+                else:
+                    ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_chase_avoided",
+                                          pnl_usd=0.0, classification="chase_avoided")
                 continue
 
             # ---- Gold Quarantine & Small Account Capital Shield ----
@@ -1074,7 +1144,7 @@ def tick() -> bool:
             if lots < 0.01:
                 c = config.CONTRACTS.get(symbol, {})
                 min_risk = 0.01 * (actual_sl_dist / c.get("point", 0.01)) * c.get("pip_value_per_lot_usd", 1.0)
-                if symbol == "XAUUSD" and getattr(config, "RETRACE_ENABLED", False):
+                if getattr(config, "RETRACE_ENABLED", True):
                     pending_retrace = _load_pending_retrace()
                     if str(ref_key) not in pending_retrace:
                         tp_75 = entry_price + (tp - entry_price) * getattr(config, "RETRACE_INVAL_TP_PCT", 0.75)
