@@ -245,8 +245,8 @@ def _is_rollover_blackout() -> bool:
     """True if current UTC time is within the daily rollover blackout window (e.g. 20:55 - 22:15 UTC)."""
     now_utc = dt.datetime.now(dt.timezone.utc).time()
     try:
-        sh, sm = [int(x) for x in getattr(config, "ROLLOVER_START_UTC", "20:55").split(":")]
-        eh, em = [int(x) for x in getattr(config, "ROLLOVER_END_UTC", "22:15").split(":")]
+        sh, sm = [int(x) for x in getattr(config, "ROLLOVER_START_UTC", "23:45").split(":")]
+        eh, em = [int(x) for x in getattr(config, "ROLLOVER_END_UTC", "00:25").split(":")]
         start = dt.time(sh, sm)
         end = dt.time(eh, em)
         if start <= end:
@@ -257,12 +257,12 @@ def _is_rollover_blackout() -> bool:
 
 
 def _is_prerollover_window() -> bool:
-    """True if within the 10-minute pre-rollover de-risking window (20:45 - 20:55 UTC)."""
+    """True if within the 15-minute pre-rollover de-risking window (23:30 - 23:45 UTC)."""
     now_utc = dt.datetime.now(dt.timezone.utc).time()
     try:
-        sh, sm = [int(x) for x in getattr(config, "ROLLOVER_START_UTC", "20:55").split(":")]
+        sh, sm = [int(x) for x in getattr(config, "ROLLOVER_START_UTC", "23:45").split(":")]
         start_min = sh * 60 + sm
-        preroll_min = max(0, start_min - 10)
+        preroll_min = max(0, start_min - 15)
         curr_min = now_utc.hour * 60 + now_utc.minute
         return preroll_min <= curr_min < start_min
     except Exception:

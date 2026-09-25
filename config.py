@@ -54,8 +54,10 @@ IS_CENT_ACCOUNT = os.getenv("IS_CENT_ACCOUNT", "0") == "1"              # Set 1 
 MAX_CHASE_TP_PCT = float(os.getenv("MAX_CHASE_TP_PCT", "0.25"))         # Never chase if price already ran >25% towards TP
 MAX_ADVERSE_DRIFT_PCT = float(os.getenv("MAX_ADVERSE_DRIFT_PCT", "0.35"))# Never chase if price ran >35% adverse towards SL
 
-
-
+# ---- Daily Broker Rollover Protection (Headway 23:45 - 00:25 UTC) ----
+ROLLOVER_START_UTC = os.getenv("ROLLOVER_START_UTC", "23:45")             # Pre-rollover start (when spreads widen)
+ROLLOVER_END_UTC = os.getenv("ROLLOVER_END_UTC", "00:25")                 # Post-rollover end (when liquidity normalizes)
+CLOSE_IN_PROFIT_BEFORE_ROLLOVER = os.getenv("CLOSE_IN_PROFIT_BEFORE_ROLLOVER", "1") == "1" # Lock profit before spread blowout
 # ---- Scanner ----
 SCAN_INTERVAL_SEC = int(os.getenv("SCAN_INTERVAL_SEC", "150"))  # ~ every 2.5 min
 MIN_TRADES_BEFORE_RESEND_SAME_SETUP = 2
