@@ -4,9 +4,9 @@
 Posts a stats summary to the configured Telegram channel each time the
 market closes for the week (scheduled by .github/workflows/weekly-report.yml).
 
-Groups every delivered setup by the bot-upgrade era active when it was
-captured (boundaries are the UTC times the relevant commits were pushed),
-then summarizes the trailing 7 days and the all-time totals.
+Summarizes:
+1. Trailing 7 days (weekly) overall and broken down across all pairs.
+2. All-time overall and broken down across all pairs.
 
 Secrets come from GitHub Actions secrets (BOT_TOKEN, CHAT_ID). The script
 only reads gha_state/state.json (committed by the scanner) and sends the
@@ -27,6 +27,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+if sys.stdout and hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 try:
     from dotenv import load_dotenv  # local runs only
     load_dotenv(Path(__file__).resolve().parents[1] / ".env")
@@ -41,30 +47,9 @@ STATE_FILE = BASE_DIR / "gha_state" / "state.json"
 TOKEN = os.getenv("BOT_TOKEN", "")
 CHAT_ID = os.getenv("CHAT_ID", "")
 
-# Upgrade eras: (label, UTC boundary). Setups captured before the boundary
-# belong to the era; the last one is open-ended (the current config).
-# Update this list when a new version-affecting config ships.
-ERAS = [
-    ("Grand opening (no floor, no clamp)",             datetime.datetime(2026, 9, 15, 6, 3, tzinfo=datetime.timezone.utc)),
-    ("RR floor + outcomes (TP unclamped)",             datetime.datetime(2026, 9, 15, 14, 24, tzinfo=datetime.timezone.utc)),
-    ("TP clamp to 1.4R",                                datetime.datetime(2026, 9, 16, 9, 56, tzinfo=datetime.timezone.utc)),
-    ("Session filter + 3-pair + setup #",               datetime.datetime(2026, 9, 16, 20, 43, tzinfo=datetime.timezone.utc)),
-    ("sl_buf 0.25 (current)",                           None),
-]
-
 
 def _parse_ts(s: str) -> datetime.datetime:
     return datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
-
-
-def era_index(ts_str: str) -> int:
-    t = _parse_ts(ts_str)
-    for i, (_, bound) in enumerate(ERAS):
-        if bound is None:
-            return i
-        if t < bound:
-            return i
-    return len(ERAS) - 1
 
 
 def _fmt_pct(x: float) -> str:
@@ -72,25 +57,46 @@ def _fmt_pct(x: float) -> str:
 
 
 def _stats(rows: list[dict]) -> dict:
-    """Aggregate (n, tp, sl, wr, avg_rr, tot_r, pf) from raw history rows of
-    the form {rr, outcome} where outcome is 'tp'/'sl' ('' for pending)."""
-    tp = sum(1 for r in rows if r["outcome"] == "tp")
-    sl = sum(1 for r in rows if r["outcome"] == "sl")
+    """Aggregate (n, tp, sl, wr, avg_rr, tot_r, pf, pending) from raw history rows."""
+    tp = sum(1 for r in rows if r.get("outcome") == "tp")
+    sl = sum(1 for r in rows if r.get("outcome") == "sl")
+    resolved = tp + sl
     n = len(rows)
-    rr = [r["rr"] for r in rows if r.get("rr") is not None]
-    realized = [r["rr"] for r in rows if r["outcome"] == "tp"] + \
-        [-1.0] * sl
-    tot = sum(realized) if realized else 0.0
+    pending = sum(1 for r in rows if r.get("outcome") not in ("tp", "sl"))
+
+    rr_vals = [float(r["rr"]) for r in rows if r.get("rr") is not None and float(r["rr"]) > 0]
+    avg_rr = (sum(rr_vals) / len(rr_vals)) if rr_vals else 0.0
+
+    realized = [float(r["rr"]) for r in rows if r.get("outcome") == "tp" and r.get("rr") is not None] + [-1.0] * sl
+    tot_r = sum(realized) if realized else 0.0
     gw = sum(r for r in realized if r > 0)
     gl = -sum(r for r in realized if r < 0)
-    pf = gw / gl if gl > 0 else float("inf") if gw > 0 else 0.0
+    pf = (gw / gl) if gl > 0 else (999.0 if gw > 0 else 0.0)
+
+    wr = (tp / resolved) if resolved > 0 else 0.0
     return {
-        "n": n, "tp": tp, "sl": sl,
-        "wr": (tp / n) if n else 0.0,
-        "avg_rr": (sum(rr) / len(rr)) if rr else 0.0,
-        "tot_r": tot, "pf": pf,
-        "pending": sum(1 for r in rows if not r["outcome"]),
+        "n": n,
+        "resolved": resolved,
+        "tp": tp,
+        "sl": sl,
+        "pending": pending,
+        "wr": wr,
+        "avg_rr": avg_rr,
+        "tot_r": tot_r,
+        "pf": pf,
     }
+
+
+def _stats_by_pair(rows: list[dict]) -> list[tuple[str, dict]]:
+    """Group rows by symbol and sort by total R descending."""
+    syms = sorted(set(r["symbol"] for r in rows if r.get("symbol")))
+    pair_stats = []
+    for sym in syms:
+        sub = [r for r in rows if r.get("symbol") == sym]
+        st = _stats(sub)
+        pair_stats.append((sym, st))
+    pair_stats.sort(key=lambda item: item[1]["tot_r"], reverse=True)
+    return pair_stats
 
 
 def load_rows() -> list[dict]:
@@ -101,11 +107,13 @@ def load_rows() -> list[dict]:
     outcomes = state.get("outcomes", {})
     rows = []
     for h in state.get("history", []):
-        o = outcomes.get(f"{h.get('symbol')}:{h.get('ts')}", {})
+        sym = h.get("symbol", "?")
+        ts = h.get("ts", "")
+        o = outcomes.get(f"{sym}:{ts}", {})
         rows.append({
-            "ts": h["ts"],
+            "ts": ts,
             "kind": "setup",
-            "symbol": h.get("symbol", "?"),
+            "symbol": sym,
             "dir": h.get("dir", "?"),
             "rr": h.get("rr"),
             "outcome": o.get("hit", ""),
@@ -117,39 +125,49 @@ def load_rows() -> list[dict]:
 def build_report(rows: list[dict]) -> str:
     now = datetime.datetime.now(datetime.timezone.utc)
     L: list[str] = []
-    L.append("\U0001F4CA Weekly close report")
-    L.append(f"Generated {now:%a %d %b %Y %H:%M}Z")
-    L.append("\u2500" * 26)
+    L.append("📊 GOLDFX WEEKLY CLOSE REPORT")
+    L.append(f"Generated {now:%a %d %b %Y %H:%M} UTC")
+    L.append("─" * 26)
 
-    # trailing 7 days
+    # 1. Trailing 7 days (Weekly Performance)
     week_ago = now - datetime.timedelta(days=7)
-    wk = [r for r in rows if _parse_ts(r["ts"]) >= week_ago]
-    s = _stats(wk)
-    if s["n"]:
-        L.append(f"LAST 7 DAYS: {s['n']} setups ({s['tp']} TP / {s['sl']} SL"
-                 f"{' / ' + str(s['pending']) + ' open' if s['pending'] else ''})")
-        L.append(f"WR {_fmt_pct(s['wr'])}  avgRR {s['avg_rr']:.2f}  "
-                 f"totR {s['tot_r']:+.1f}  PF {s['pf']:.2f}")
+    wk_rows = [r for r in rows if _parse_ts(r["ts"]) >= week_ago]
+    s_wk = _stats(wk_rows)
+
+    L.append("🗓 LAST 7 DAYS (WEEKLY PERFORMANCE)")
+    if s_wk["n"]:
+        pf_str = f"{s_wk['pf']:.2f}" if s_wk["pf"] < 100 else "∞"
+        L.append(f"Total: {s_wk['n']} setups ({s_wk['tp']} TP / {s_wk['sl']} SL"
+                 f"{' / ' + str(s_wk['pending']) + ' open' if s_wk['pending'] else ''})")
+        L.append(f"Win Rate: {_fmt_pct(s_wk['wr'])} · Net R: {s_wk['tot_r']:+.1f}R · PF: {pf_str}")
+        L.append(f"Average Planned RR: 1 : {s_wk['avg_rr']:.2f}")
+        L.append("")
+        L.append("Per-Pair Weekly Breakdown:")
+        for sym, st in _stats_by_pair(wk_rows):
+            p_pf = f"{st['pf']:.2f}" if st["pf"] < 100 else "∞"
+            L.append(f"  • {sym:7s} {st['n']:2d} setups ({st['tp']:2d}W - {st['sl']:2d}L) "
+                     f"· WR {_fmt_pct(st['wr'])} · {st['tot_r']:+6.1f}R · PF {p_pf}")
     else:
-        L.append("LAST 7 DAYS: no setups")
-    L.append("\u2500" * 26)
+        L.append("  No setups delivered in the last 7 days.")
+    L.append("─" * 26)
 
-    # all-time, per era
+    # 2. All-Time Performance across all pairs
     s_all = _stats(rows)
-    L.append(f"ALL-TIME: {s_all['n']} setups, WR {_fmt_pct(s_all['wr'])}, "
-             f"totR {s_all['tot_r']:+.1f}, PF {s_all['pf']:.2f}")
+    all_pf = f"{s_all['pf']:.2f}" if s_all["pf"] < 100 else "∞"
+    L.append("🌐 ALL-TIME PERFORMANCE (ALL PAIRS)")
+    L.append(f"Total: {s_all['n']} setups ({s_all['tp']} TP / {s_all['sl']} SL"
+             f"{' / ' + str(s_all['pending']) + ' open' if s_all['pending'] else ''})")
+    L.append(f"Win Rate: {_fmt_pct(s_all['wr'])} · Net R: {s_all['tot_r']:+.1f}R · PF: {all_pf}")
+    L.append(f"Average Planned RR: 1 : {s_all['avg_rr']:.2f}")
     L.append("")
-    for i, (label, _) in enumerate(ERAS):
-        era_rows = [r for r in rows if era_index(r["ts"]) == i]
-        s = _stats(era_rows)
-        if not s["n"]:
-            continue
-        L.append(f"\u25CE {label}:")
-        L.append(f"    {s['n']} setups ({s['tp']} TP / {s['sl']} SL)"
-                 f"  WR {_fmt_pct(s['wr'])}  totR {s['tot_r']:+.1f}  PF {s['pf']:.2f}")
+    L.append("Per-Pair All-Time Breakdown:")
+    for sym, st in _stats_by_pair(rows):
+        p_pf = f"{st['pf']:.2f}" if st["pf"] < 100 else "∞"
+        L.append(f"  • {sym:7s} {st['n']:2d} setups ({st['tp']:2d}W - {st['sl']:2d}L) "
+                 f"· WR {_fmt_pct(st['wr'])} · {st['tot_r']:+6.1f}R · PF {p_pf}")
 
-    L.append("\u2500" * 26)
-    L.append("\u26A0\ufe0f Not financial advice.")
+    L.append("─" * 26)
+    L.append("⚠️ Not financial advice. Verified outcomes via institutional benchmark.")
     return "\n".join(L)
 
 
