@@ -159,14 +159,28 @@ def _get_http():
 
 
 def fetch_state() -> dict:
-    """GET state.json from the public raw GitHub URL."""
-    try:
-        r = _get_http().get(_STATE_CACHE)
-        if r.status_code == 200:
-            return json.loads(r.text)
-        log.warning("state fetch HTTP %d: %s", r.status_code, r.text[:200])
-    except Exception as e:
-        log.warning("state fetch failed: %s", e)
+    """GET state.json from configured URL, with automatic fallback to public raw GitHub URL."""
+    urls = [_STATE_CACHE]
+    raw_github = "https://raw.githubusercontent.com/Glitch-WRLD/goldfx-github/main/gha_state/state.json"
+    if raw_github not in urls:
+        urls.append(raw_github)
+
+    for u in urls:
+        try:
+            r = _get_http().get(u)
+            if r.status_code == 200:
+                return json.loads(r.text)
+            log.warning("state fetch (%s) HTTP %d", u, r.status_code)
+        except Exception as e:
+            log.warning("state fetch (%s) failed: %s", u, e)
+
+    # Local disk fallback if available
+    local_state = Path(__file__).resolve().parents[1] / "gha_state" / "state.json"
+    if local_state.exists():
+        try:
+            return json.loads(local_state.read_text(encoding="utf-8"))
+        except Exception as e:
+            log.warning("local state read failed: %s", e)
     return {}
 
 
