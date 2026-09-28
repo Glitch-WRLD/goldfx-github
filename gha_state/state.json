@@ -71,6 +71,7 @@
   "USDCAD:2026-09-27T23:00:00+00:00",
   "USDCAD:2026-09-28T00:00:00+00:00",
   "USDCAD:2026-09-28T05:00:00+00:00",
+  "USDCAD:2026-09-28T11:00:00+00:00",
   "XAUUSD:2026-09-14T01:00:00+00:00",
   "XAUUSD:2026-09-14T02:30:00+00:00",
   "XAUUSD:2026-09-14T03:30:00+00:00",
@@ -132,6 +133,20 @@
   "XAUUSD:2026-09-28T08:00:00+00:00"
  ],
  "history": [
+  {
+   "dir": "LONG",
+   "entry": 1.41646,
+   "profile": "balanced",
+   "ref": 94,
+   "rr": 2.73,
+   "sl": 1.4157749811196898,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "USDCAD",
+   "tf": "H1",
+   "tp": 1.4183310264324345,
+   "ts": "2026-09-28T11:00:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 0.70139,
@@ -2624,6 +2639,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 93,
+ "ref_seq": 94,
  "zones": []
 }
