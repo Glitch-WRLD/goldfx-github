@@ -107,18 +107,21 @@ ROLLOVER_MIN_MARGIN_LEVEL_PCT = float(os.getenv("ROLLOVER_MIN_MARGIN_LEVEL_PCT",
 
 # ---- Account-Size Tiered Trade Capacity ----
 def dynamic_portfolio_capacity(balance: float, is_cent: bool = False) -> tuple[int, int, float, str]:
-    """Return (max_trades, max_trades_per_sym, max_portfolio_risk_pct, tier_name) based on real USD account equity:
-    - Below $50:  3 trades max, 1 per pair, 20% max open risk (Tier 1: Small Balance)
-    - $50 - $500: 4 trades max, 1 per pair, 25% max open risk (Tier 2: Mid Balance)
-    - $500+:      5 trades max, 2 per pair, 30% max open risk (Tier 3: Institutional Free)
+    """Return (max_trades, max_trades_per_sym, max_portfolio_risk_pct, tier_name):
+    - Cent Accounts: Run on Tier 3 Freedom (8 trades max, 2 per pair, 30% max open risk)
+    - Standard Accounts < $50:  3 trades max, 1 per pair, 20% max open risk (Tier 1: Small Balance)
+    - Standard Accounts $50-$500: 4 trades max, 1 per pair, 25% max open risk (Tier 2: Mid Balance)
+    - Standard Accounts $500+:  8 trades max, 2 per pair, 30% max open risk (Tier 3: Institutional Free)
     """
-    usd_bal = (balance / 100.0) if is_cent else balance
-    if usd_bal < 50.0:
-        return 3, 1, 20.0, f"Tier 1 (<$50, Real: ${usd_bal:.2f})"
-    elif usd_bal < 500.0:
-        return 4, 1, 25.0, f"Tier 2 ($50-$500, Real: ${usd_bal:.2f})"
+    if is_cent:
+        return 8, 2, 30.0, f"Cent Account Tier 3 (Micro-Scale: {balance:.0f} USC · 8 Trades Max · 2/Pair)"
+
+    if balance < 50.0:
+        return 3, 1, 20.0, f"Tier 1 (<$50 Standard · ${balance:.2f} · 3 Trades Max · 1/Pair)"
+    elif balance < 500.0:
+        return 4, 1, 25.0, f"Tier 2 ($50-$500 Standard · ${balance:.2f} · 4 Trades Max · 1/Pair)"
     else:
-        return 5, 2, 30.0, f"Tier 3 ($500+, Real: ${usd_bal:.2f})"
+        return 8, 2, 30.0, f"Tier 3 ($500+ Standard · ${balance:.2f} · 8 Trades Max · 2/Pair)"
 
 # ---- Smart Reversal Early Exit (Asset-Specific: XAUUSD only) ----
 GOLD_REVERSAL_EXIT_ENABLED = os.getenv("GOLD_REVERSAL_EXIT_ENABLED", "1") == "1"

@@ -947,13 +947,14 @@ def tick() -> bool:
     if hasattr(config, "dynamic_portfolio_capacity"):
         max_trades, max_trades_per_sym, max_portfolio_risk_pct, cap_tier = config.dynamic_portfolio_capacity(rm.balance, is_cent)
     else:
-        usd_bal = (rm.balance / 100.0) if is_cent else rm.balance
-        if usd_bal < 50.0:
+        if is_cent:
+            max_trades, max_trades_per_sym, max_portfolio_risk_pct = 8, 2, 30.0
+        elif rm.balance < 50.0:
             max_trades, max_trades_per_sym, max_portfolio_risk_pct = 3, 1, 20.0
-        elif usd_bal < 500.0:
+        elif rm.balance < 500.0:
             max_trades, max_trades_per_sym, max_portfolio_risk_pct = 4, 1, 25.0
         else:
-            max_trades, max_trades_per_sym, max_portfolio_risk_pct = 5, 2, 30.0
+            max_trades, max_trades_per_sym, max_portfolio_risk_pct = 8, 2, 30.0
 
     target_broker = getattr(ex, "broker", "mt5")
     open_positions = [
