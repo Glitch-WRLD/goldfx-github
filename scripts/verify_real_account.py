@@ -56,13 +56,12 @@ def run_verification():
     print(f"    • XAUUSD with $18.00 Stop:  {gold_lots:.2f} lots  -> Risk: {risk_standard:.1f} {curr_label} (${risk_standard/100:.2f} USD)")
     print(f"    • EURUSD with 20-pip Stop: {eur_lots:.2f} lots  -> Risk: {risk_standard:.1f} {curr_label} (${risk_standard/100:.2f} USD)")
 
-    # 5. Account Capacity
-    small_acct = balance < 100.0 and not is_cent
-    max_trades = config.SMALL_ACCOUNT_MAX_TRADES if small_acct else config.MAX_CONCURRENT_TRADES
-    max_portfolio_risk = config.SMALL_ACCOUNT_MAX_PORTFOLIO_RISK_PCT if small_acct else config.MAX_PORTFOLIO_RISK_PCT
-    print(f"\n[5] Portfolio Exposure Capacity:")
-    print(f"    Max Concurrent Trades:     {max_trades} Trades")
-    print(f"    Max Open Portfolio Risk:   {max_portfolio_risk:.1f}% ({balance * max_portfolio_risk / 100.0:.1f} {curr_label})")
+    # 5. Account Capacity (Tiered by Real USD Equity)
+    max_trades, max_sym, max_port_risk, tier_label = config.dynamic_portfolio_capacity(balance, is_cent)
+    print(f"\n[5] Portfolio Exposure Capacity (Dynamic by Real USD Size):")
+    print(f"    Active Capacity Tier:      {tier_label}")
+    print(f"    Max Concurrent Trades:     {max_trades} Trades (Max {max_sym} per pair)")
+    print(f"    Max Open Portfolio Risk:   {max_port_risk:.1f}% ({balance * max_port_risk / 100.0:.1f} {curr_label} = ${(balance * max_port_risk / 100.0)/100:.2f} USD)")
 
     # 6. Live Spreads
     print("\n[6] Live Market Spreads:")

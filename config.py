@@ -104,8 +104,21 @@ LOCAL_TP_GUARD_ENABLED = os.getenv("LOCAL_TP_GUARD_ENABLED", "1") == "1"     # c
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.5"))                 # max FX spread (pips) for market entry
 MAX_SPREAD_GOLD = float(os.getenv("MAX_SPREAD_GOLD", "1.50"))          # max XAUUSD spread ($) for market entry
 ROLLOVER_MIN_MARGIN_LEVEL_PCT = float(os.getenv("ROLLOVER_MIN_MARGIN_LEVEL_PCT", "250.0"))  # stress test margin %
-SMALL_ACCOUNT_MAX_TRADES = int(os.getenv("SMALL_ACCOUNT_MAX_TRADES", "3"))               # max concurrent trades if balance < $100
-SMALL_ACCOUNT_MAX_PORTFOLIO_RISK_PCT = float(os.getenv("SMALL_ACCOUNT_MAX_PORTFOLIO_RISK_PCT", "20.0")) # max risk if balance < $100
+
+# ---- Account-Size Tiered Trade Capacity ----
+def dynamic_portfolio_capacity(balance: float, is_cent: bool = False) -> tuple[int, int, float, str]:
+    """Return (max_trades, max_trades_per_sym, max_portfolio_risk_pct, tier_name) based on real USD account equity:
+    - Below $50:  3 trades max, 1 per pair, 20% max open risk (Tier 1: Small Balance)
+    - $50 - $500: 4 trades max, 1 per pair, 25% max open risk (Tier 2: Mid Balance)
+    - $500+:      5 trades max, 2 per pair, 30% max open risk (Tier 3: Institutional Free)
+    """
+    usd_bal = (balance / 100.0) if is_cent else balance
+    if usd_bal < 50.0:
+        return 3, 1, 20.0, f"Tier 1 (<$50, Real: ${usd_bal:.2f})"
+    elif usd_bal < 500.0:
+        return 4, 1, 25.0, f"Tier 2 ($50-$500, Real: ${usd_bal:.2f})"
+    else:
+        return 5, 2, 30.0, f"Tier 3 ($500+, Real: ${usd_bal:.2f})"
 
 # ---- Smart Reversal Early Exit (Asset-Specific: XAUUSD only) ----
 GOLD_REVERSAL_EXIT_ENABLED = os.getenv("GOLD_REVERSAL_EXIT_ENABLED", "1") == "1"

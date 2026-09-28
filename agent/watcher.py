@@ -933,15 +933,27 @@ def tick() -> bool:
 
     fired_any = False
 
-    # Defense 1: Portfolio Risk Budgeting & Capacity Guard
-    max_trades = int(getattr(config, "MAX_CONCURRENT_TRADES", 4))
-    max_trades_per_sym = int(getattr(config, "MAX_TRADES_PER_SYMBOL", 2))
-    max_portfolio_risk_pct = float(getattr(config, "MAX_PORTFOLIO_RISK_PCT", 18.0))
+    # Defense 1: Portfolio Risk Budgeting & Capacity Guard (Dynamic by Real USD Account Size)
+    is_cent = getattr(config, "IS_CENT_ACCOUNT", False)
+    if not is_cent and hasattr(ex, "account_snapshot"):
+        try:
+            snap = ex.account_snapshot()
+            acc_curr = str(snap.get("currency", "")).upper()
+            if "CENT" in acc_curr or "USC" in acc_curr:
+                is_cent = True
+        except Exception:
+            pass
 
-    if rm.balance < 100.0:
-        max_trades = min(max_trades, int(getattr(config, "SMALL_ACCOUNT_MAX_TRADES", 3)))
-        max_trades_per_sym = 1
-        max_portfolio_risk_pct = min(max_portfolio_risk_pct, float(getattr(config, "SMALL_ACCOUNT_MAX_PORTFOLIO_RISK_PCT", 20.0)))
+    if hasattr(config, "dynamic_portfolio_capacity"):
+        max_trades, max_trades_per_sym, max_portfolio_risk_pct, cap_tier = config.dynamic_portfolio_capacity(rm.balance, is_cent)
+    else:
+        usd_bal = (rm.balance / 100.0) if is_cent else rm.balance
+        if usd_bal < 50.0:
+            max_trades, max_trades_per_sym, max_portfolio_risk_pct = 3, 1, 20.0
+        elif usd_bal < 500.0:
+            max_trades, max_trades_per_sym, max_portfolio_risk_pct = 4, 1, 25.0
+        else:
+            max_trades, max_trades_per_sym, max_portfolio_risk_pct = 5, 2, 30.0
 
     target_broker = getattr(ex, "broker", "mt5")
     open_positions = [
