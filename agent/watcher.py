@@ -939,9 +939,9 @@ def tick() -> bool:
     max_portfolio_risk_pct = float(getattr(config, "MAX_PORTFOLIO_RISK_PCT", 18.0))
 
     if rm.balance < 100.0:
-        max_trades = min(max_trades, int(getattr(config, "SMALL_ACCOUNT_MAX_TRADES", 2)))
+        max_trades = min(max_trades, int(getattr(config, "SMALL_ACCOUNT_MAX_TRADES", 3)))
         max_trades_per_sym = 1
-        max_portfolio_risk_pct = min(max_portfolio_risk_pct, float(getattr(config, "SMALL_ACCOUNT_MAX_PORTFOLIO_RISK_PCT", 15.0)))
+        max_portfolio_risk_pct = min(max_portfolio_risk_pct, float(getattr(config, "SMALL_ACCOUNT_MAX_PORTFOLIO_RISK_PCT", 20.0)))
 
     target_broker = getattr(ex, "broker", "mt5")
     open_positions = [

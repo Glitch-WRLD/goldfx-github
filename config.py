@@ -34,8 +34,8 @@ ACCOUNT_BALANCE = float(os.getenv("ACCOUNT_BALANCE", "100.0"))
 DYNAMIC_BALANCE = os.getenv("DYNAMIC_BALANCE", "1") == "1"   # dynamically read live balance from MT5/broker
 RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", "6.0"))   # % of balance at risk per trade
 MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", "8.0"))  # hard cap
-DAILY_LOSS_LIMIT = float(os.getenv("DAILY_LOSS_LIMIT", "12.0"))  # % of balance -> stop trading for the day (2 losses max)
-MAX_CONSECUTIVE_LOSSES = int(os.getenv("MAX_CONSECUTIVE_LOSSES", "2"))
+DAILY_LOSS_LIMIT = float(os.getenv("DAILY_LOSS_LIMIT", "18.0"))  # % of balance -> stop trading for the day (3 losses max)
+MAX_CONSECUTIVE_LOSSES = int(os.getenv("MAX_CONSECUTIVE_LOSSES", "3"))
 KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", "0.25"))   # scaled kelly cap
 
 # ---- Gold Retracement Sniper (M5 Swing Anchor for small accounts) ----
@@ -104,8 +104,8 @@ LOCAL_TP_GUARD_ENABLED = os.getenv("LOCAL_TP_GUARD_ENABLED", "1") == "1"     # c
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.5"))                 # max FX spread (pips) for market entry
 MAX_SPREAD_GOLD = float(os.getenv("MAX_SPREAD_GOLD", "1.50"))          # max XAUUSD spread ($) for market entry
 ROLLOVER_MIN_MARGIN_LEVEL_PCT = float(os.getenv("ROLLOVER_MIN_MARGIN_LEVEL_PCT", "250.0"))  # stress test margin %
-SMALL_ACCOUNT_MAX_TRADES = int(os.getenv("SMALL_ACCOUNT_MAX_TRADES", "2"))               # max concurrent trades if balance < $100
-SMALL_ACCOUNT_MAX_PORTFOLIO_RISK_PCT = float(os.getenv("SMALL_ACCOUNT_MAX_PORTFOLIO_RISK_PCT", "15.0")) # max risk if balance < $100
+SMALL_ACCOUNT_MAX_TRADES = int(os.getenv("SMALL_ACCOUNT_MAX_TRADES", "3"))               # max concurrent trades if balance < $100
+SMALL_ACCOUNT_MAX_PORTFOLIO_RISK_PCT = float(os.getenv("SMALL_ACCOUNT_MAX_PORTFOLIO_RISK_PCT", "20.0")) # max risk if balance < $100
 
 # ---- Smart Reversal Early Exit (Asset-Specific: XAUUSD only) ----
 GOLD_REVERSAL_EXIT_ENABLED = os.getenv("GOLD_REVERSAL_EXIT_ENABLED", "1") == "1"
