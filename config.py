@@ -103,10 +103,9 @@ MAX_PORTFOLIO_RISK_PCT = float(os.getenv("MAX_PORTFOLIO_RISK_PCT", "30.0"))  # m
 LOCAL_TP_GUARD_ENABLED = os.getenv("LOCAL_TP_GUARD_ENABLED", "1") == "1"     # close immediately if chart price touches TP
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.5"))                 # max FX spread (pips) for market entry
 MAX_SPREAD_GOLD = float(os.getenv("MAX_SPREAD_GOLD", "1.50"))          # max XAUUSD spread ($) for market entry
-ROLLOVER_START_UTC = os.getenv("ROLLOVER_START_UTC", "20:55")          # rollover blackout start time (HH:MM UTC)
-ROLLOVER_END_UTC = os.getenv("ROLLOVER_END_UTC", "22:15")              # rollover blackout end time (HH:MM UTC)
 ROLLOVER_MIN_MARGIN_LEVEL_PCT = float(os.getenv("ROLLOVER_MIN_MARGIN_LEVEL_PCT", "250.0"))  # stress test margin %
-CLOSE_IN_PROFIT_BEFORE_ROLLOVER = os.getenv("CLOSE_IN_PROFIT_BEFORE_ROLLOVER", "1") == "1"   # close profitable trades before rollover
+SMALL_ACCOUNT_MAX_TRADES = int(os.getenv("SMALL_ACCOUNT_MAX_TRADES", "2"))               # max concurrent trades if balance < $100
+SMALL_ACCOUNT_MAX_PORTFOLIO_RISK_PCT = float(os.getenv("SMALL_ACCOUNT_MAX_PORTFOLIO_RISK_PCT", "15.0")) # max risk if balance < $100
 
 # ---- Smart Reversal Early Exit (Asset-Specific: XAUUSD only) ----
 GOLD_REVERSAL_EXIT_ENABLED = os.getenv("GOLD_REVERSAL_EXIT_ENABLED", "1") == "1"

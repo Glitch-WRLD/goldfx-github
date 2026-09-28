@@ -669,6 +669,17 @@ def process_pending_retracements(ledger) -> int:
         had_pullback = bool(item.get("had_pullback", False))
         label = item.get("label", f"goldfx #{ref_key}")
 
+        # 0. Gold Quarantine Guard for Standard small accounts (<$50)
+        is_cent_account = getattr(config, "IS_CENT_ACCOUNT", False)
+        if symbol == "XAUUSD" and not is_cent_account and getattr(config, "GOLD_QUARANTINE_ENABLED", True):
+            min_gold_abs = float(getattr(config, "MIN_GOLD_ABSOLUTE_BALANCE", 50.0))
+            if rm.balance < min_gold_abs:
+                log.info("RETRACE_QUARANTINE XAUUSD ref=%s — balance ($%.2f) below $%.2f minimum for Standard Gold. Cancelled.",
+                         ref_key, rm.balance, min_gold_abs)
+                ledger.record_outcome(ref_key, status="quarantined", hit="gold_quarantined_low_balance",
+                                      pnl_usd=0.0, classification="gold_small_account_quarantine")
+                continue
+
         # A. Timeout check (e.g. 6 hours)
         max_wait_sec = float(getattr(config, "RETRACE_MAX_WAIT_HOURS", 6.0)) * 3600
         if now - first_seen > max_wait_sec:
@@ -799,10 +810,13 @@ def process_pending_retracements(ledger) -> int:
 
         if lots < min_lot:
             min_risk = min_lot * (candidate_sl_dist / point) * pip_val
-            max_allowed = float(getattr(config, "RETRACE_MAX_RISK_USD", 7.50))
-            if rm.balance < 150.0 and min_risk > max_allowed:
-                log.info("RETRACE_SKIP_BAR ref=%s %s min lot risk $%.2f exceeds small account cap $%.2f",
-                         ref_key, symbol, min_risk, max_allowed)
+            # On small accounts, cap max allowed risk dynamically to max_risk_pct of balance (e.g. 8% of $40 = $3.20)
+            max_risk_pct = float(getattr(config, "MAX_RISK_PER_TRADE", 8.0))
+            dyn_cap = rm.balance * (max_risk_pct / 100.0) if rm.balance > 0 else 7.50
+            max_allowed = min(float(getattr(config, "RETRACE_MAX_RISK_USD", 7.50)), dyn_cap)
+            if min_risk > max_allowed:
+                log.info("RETRACE_SKIP_BAR ref=%s %s min lot risk $%.2f exceeds small account cap $%.2f (%.1f%% of balance)",
+                         ref_key, symbol, min_risk, max_allowed, (min_risk / rm.balance * 100) if rm.balance > 0 else 0)
                 still_pending[ref_key] = item
                 continue
             lots = min_lot
@@ -923,6 +937,11 @@ def tick() -> bool:
     max_trades = int(getattr(config, "MAX_CONCURRENT_TRADES", 4))
     max_trades_per_sym = int(getattr(config, "MAX_TRADES_PER_SYMBOL", 2))
     max_portfolio_risk_pct = float(getattr(config, "MAX_PORTFOLIO_RISK_PCT", 18.0))
+
+    if rm.balance < 100.0:
+        max_trades = min(max_trades, int(getattr(config, "SMALL_ACCOUNT_MAX_TRADES", 2)))
+        max_trades_per_sym = 1
+        max_portfolio_risk_pct = min(max_portfolio_risk_pct, float(getattr(config, "SMALL_ACCOUNT_MAX_PORTFOLIO_RISK_PCT", 15.0)))
 
     target_broker = getattr(ex, "broker", "mt5")
     open_positions = [

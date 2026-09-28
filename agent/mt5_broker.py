@@ -76,18 +76,35 @@ class Mt5Broker:
         if not mt5.initialize(**kwargs):
             err = mt5.last_error()
             raise RuntimeError(f"MT5 initialize failed: {err}")
-        if self.login_id is not None:
-            params = {"login": self.login_id, "password": self.password}
-            if self.server:
-                params["server"] = self.server
-            ok = mt5.login(**params)
-            if not ok:
-                raise RuntimeError(f"MT5 login failed: {mt5.last_error()}")
+
         info = mt5.account_info()
+        # If terminal is already logged into the requested account, use it directly!
+        if self.login_id is not None:
+            if info is None or info.login != self.login_id:
+                params = {"login": self.login_id}
+                if self.password:
+                    params["password"] = self.password
+                if self.server:
+                    params["server"] = self.server
+                ok = mt5.login(**params)
+                if not ok:
+                    raise RuntimeError(f"MT5 login failed: {mt5.last_error()}")
+                info = mt5.account_info()
+
         if info is None:
             raise RuntimeError("MT5 connected but no account_info (not logged in?)")
+
+        # Verify automated trading permissions
+        t_info = mt5.terminal_info()
+        if t_info and not t_info.trade_allowed:
+            raise RuntimeError("MT5 Algo Trading is DISABLED in terminal! Please click the 'Algo Trading' button in MT5 toolbar.")
+        if not info.trade_allowed:
+            raise RuntimeError(f"Trading is not allowed for MT5 account {info.login}! Check broker investor password or account restrictions.")
+
         acc = info.login
-        return f"MT5 account {acc} ({info._asdict().get('server', '') if hasattr(info, '_asdict') else ''})"
+        mode_str = "REAL" if getattr(info, "trade_mode", 0) == 2 else ("CONTEST" if getattr(info, "trade_mode", 0) == 1 else "DEMO")
+        server_str = info._asdict().get('server', '') if hasattr(info, '_asdict') else ''
+        return f"MT5 account {acc} ({mode_str} \u00b7 {server_str} \u00b7 Balance: ${info.balance:.2f} \u00b7 Equity: ${info.equity:.2f})"
 
     def shutdown(self) -> None:
         try:
