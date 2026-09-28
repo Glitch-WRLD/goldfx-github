@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verification suite for GoldFX Auto-Trade Agent on Real Account."""
+"""Verification suite for GoldFX Auto-Trade Agent on Real / Cent Account."""
 
 import sys
 from pathlib import Path
@@ -20,30 +20,49 @@ def run_verification():
     status_str = broker.connect()
     print(f"\n[1] Broker Connection: OK\n    {status_str}")
 
-    # 2. Account Snapshot & Trade Permissions
+    # 2. Account Financials
     snap = broker.account_snapshot()
     balance = float(snap.get("balance", 0.0))
     equity = float(snap.get("equity", 0.0))
-    currency = snap.get("currency", "USD")
-    print(f"\n[2] Account Financials:\n    Balance: ${balance:.2f} {currency}\n    Equity:  ${equity:.2f} {currency}")
+    is_cent = getattr(config, "IS_CENT_ACCOUNT", False)
+    curr_label = "USC (Cents)" if is_cent else "USD"
+    usd_val = balance / 100.0 if is_cent else balance
+    print(f"\n[2] Account Financials:\n    Balance: {balance:.2f} {curr_label} (~${usd_val:.2f} USD)\n    Equity:  {equity:.2f} {curr_label} (~${equity/100:.2f} USD)")
 
-    # 3. Gold Quarantine Check (<$50 balance)
+    # 3. Gold Access Status
     min_gold_abs = float(getattr(config, "MIN_GOLD_ABSOLUTE_BALANCE", 50.0))
-    gold_quarantined = balance < min_gold_abs and getattr(config, "GOLD_QUARANTINE_ENABLED", True)
-    print(f"\n[3] Gold ($XAUUSD) Capital Shield:\n    Min Gold Balance Required: ${min_gold_abs:.2f}\n    Current Balance:           ${balance:.2f}\n    Gold Quarantine Active:    {'YES (PROTECTED - Gold blocked to prevent margin blowout)' if gold_quarantined else 'NO'}")
+    gold_quarantined = not is_cent and balance < min_gold_abs and getattr(config, "GOLD_QUARANTINE_ENABLED", True)
+    print(f"\n[3] Account Mode & Gold Access:")
+    print(f"    Account Type:              {'CENT ACCOUNT (100x Micro Scaling)' if is_cent else 'STANDARD ACCOUNT'}")
+    print(f"    Gold ($XAUUSD) Status:     {'UNLOCKED (Micro-Lot Sizing Active)' if is_cent else ('QUARANTINED' if gold_quarantined else 'ACTIVE')}")
 
-    # 4. Risk & Lot Sizing Verification (EURUSD / GBPUSD)
+    # 4. Risk & Position Sizing
     rm = RiskManager(balance=balance)
     max_risk_pct = float(getattr(config, "MAX_RISK_PER_TRADE", 8.0))
-    risk_usd_standard = balance * (rm.risk_pct / 100.0)
-    risk_usd_max = balance * (max_risk_pct / 100.0)
-    print(f"\n[4] Risk & Position Sizing:\n    Standard Risk/Trade:       {rm.risk_pct:.1f}% (${risk_usd_standard:.2f})\n    Max Allowed Risk/Trade:    {max_risk_pct:.1f}% (${risk_usd_max:.2f})\n    Daily Loss Circuit Breaker: {config.DAILY_LOSS_LIMIT:.1f}% (${balance * config.DAILY_LOSS_LIMIT / 100.0:.2f})\n    Max Consecutive Losses:    {config.MAX_CONSECUTIVE_LOSSES}")
+    risk_standard = balance * (rm.risk_pct / 100.0)
+    risk_max = balance * (max_risk_pct / 100.0)
+    print(f"\n[4] Risk & Position Sizing:")
+    print(f"    Standard Risk/Trade:       {rm.risk_pct:.1f}% ({risk_standard:.1f} {curr_label} = ${risk_standard/100:.2f} USD)" if is_cent else f"    Standard Risk/Trade:       {rm.risk_pct:.1f}% (${risk_standard:.2f})")
+    print(f"    Max Allowed Risk/Trade:    {max_risk_pct:.1f}% ({risk_max:.1f} {curr_label} = ${risk_max/100:.2f} USD)" if is_cent else f"    Max Allowed Risk/Trade:    {max_risk_pct:.1f}% (${risk_max:.2f})")
+    print(f"    Daily Loss Circuit Breaker: {config.DAILY_LOSS_LIMIT:.1f}% ({balance * config.DAILY_LOSS_LIMIT / 100.0:.1f} {curr_label})")
+    print(f"    Max Consecutive Losses:    {config.MAX_CONSECUTIVE_LOSSES}")
 
-    # 5. Small Account Capacity Guards
-    small_acct = balance < 100.0
+    # Example Trade Lot Sizing
+    gold_stop = 18.00  # $18 typical stop
+    gold_lots = floor_lots("XAUUSD", position_size("XAUUSD", risk_standard, gold_stop))
+    eur_stop = 0.0020  # 20 pips
+    eur_lots = floor_lots("EURUSD", position_size("EURUSD", risk_standard, eur_stop))
+    print(f"\n    Example Live Lot Sizing (Exact 6.0% Risk):")
+    print(f"    • XAUUSD with $18.00 Stop:  {gold_lots:.2f} lots  -> Risk: {risk_standard:.1f} {curr_label} (${risk_standard/100:.2f} USD)")
+    print(f"    • EURUSD with 20-pip Stop: {eur_lots:.2f} lots  -> Risk: {risk_standard:.1f} {curr_label} (${risk_standard/100:.2f} USD)")
+
+    # 5. Account Capacity
+    small_acct = balance < 100.0 and not is_cent
     max_trades = config.SMALL_ACCOUNT_MAX_TRADES if small_acct else config.MAX_CONCURRENT_TRADES
     max_portfolio_risk = config.SMALL_ACCOUNT_MAX_PORTFOLIO_RISK_PCT if small_acct else config.MAX_PORTFOLIO_RISK_PCT
-    print(f"\n[5] Small Account Exposure Capacity:\n    Small Account Mode:        {'ACTIVE (Balance < $100)' if small_acct else 'INACTIVE'}\n    Max Concurrent Trades:     {max_trades} (Hard Cap)\n    Max Open Portfolio Risk:   {max_portfolio_risk:.1f}% (${balance * max_portfolio_risk / 100.0:.2f})")
+    print(f"\n[5] Portfolio Exposure Capacity:")
+    print(f"    Max Concurrent Trades:     {max_trades} Trades")
+    print(f"    Max Open Portfolio Risk:   {max_portfolio_risk:.1f}% ({balance * max_portfolio_risk / 100.0:.1f} {curr_label})")
 
     # 6. Live Spreads
     print("\n[6] Live Market Spreads:")
@@ -57,7 +76,7 @@ def run_verification():
         metric = spread_val if sym == "XAUUSD" else spread_pips
         print(f"    • {sym:7s} Spread: {metric:.1f} {unit}")
 
-    # 7. Broker Brokerage / Rollover Schedule
+    # 7. Broker Rollover Window
     print(f"\n[7] Daily Rollover Blackout Protection:\n    Headway Rollover Window:   {config.ROLLOVER_START_UTC} - {config.ROLLOVER_END_UTC} UTC\n    Pre-Rollover Profit Lock:  {'ENABLED' if config.CLOSE_IN_PROFIT_BEFORE_ROLLOVER else 'DISABLED'}")
 
     broker.shutdown()
