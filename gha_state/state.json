@@ -88,10 +88,12 @@
   "USDCAD:2026-09-28T18:00:00+00:00",
   "USDCAD:2026-09-29T00:00:00+00:00",
   "USDCAD:2026-09-29T05:00:00+00:00",
+  "USDCAD:2026-09-29T22:00:00+00:00",
   "USDCHF:2026-09-28T04:00:00+00:00",
   "USDCHF:2026-09-28T07:00:00+00:00",
   "USDCHF:2026-09-29T03:00:00+00:00",
   "USDCHF:2026-09-29T06:00:00+00:00",
+  "USDCHF:2026-09-29T22:00:00+00:00",
   "XAUUSD:2026-09-14T01:00:00+00:00",
   "XAUUSD:2026-09-14T02:30:00+00:00",
   "XAUUSD:2026-09-14T03:30:00+00:00",
@@ -155,6 +157,34 @@
   "XAUUSD:2026-09-29T17:30:00+00:00"
  ],
  "history": [
+  {
+   "dir": "LONG",
+   "entry": 0.83444,
+   "profile": "balanced",
+   "ref": 118,
+   "rr": 1.4,
+   "sl": 0.8334575414840943,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "USDCHF",
+   "tf": "H1",
+   "tp": 0.8358154419222679,
+   "ts": "2026-09-29T22:00:00+00:00"
+  },
+  {
+   "dir": "LONG",
+   "entry": 1.41902,
+   "profile": "balanced",
+   "ref": 117,
+   "rr": 1.61,
+   "sl": 1.4182912566449828,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "USDCAD",
+   "tf": "H1",
+   "tp": 1.42019,
+   "ts": "2026-09-29T22:00:00+00:00"
+  },
   {
    "dir": "LONG",
    "entry": 0.83346,
@@ -3172,6 +3202,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 116,
+ "ref_seq": 118,
  "zones": []
 }
