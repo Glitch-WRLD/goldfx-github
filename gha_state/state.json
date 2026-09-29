@@ -65,6 +65,7 @@
   "NZDUSD:2026-09-28T20:00:00+00:00",
   "NZDUSD:2026-09-28T23:00:00+00:00",
   "NZDUSD:2026-09-29T00:00:00+00:00",
+  "NZDUSD:2026-09-29T06:00:00+00:00",
   "USDCAD:2026-09-22T12:00:00+00:00",
   "USDCAD:2026-09-22T15:00:00+00:00",
   "USDCAD:2026-09-22T17:00:00+00:00",
@@ -143,6 +144,20 @@
   "XAUUSD:2026-09-28T08:00:00+00:00"
  ],
  "history": [
+  {
+   "dir": "SHORT",
+   "entry": 0.56526,
+   "profile": "balanced",
+   "ref": 105,
+   "rr": 0.72,
+   "sl": 0.5664200365886134,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "NZDUSD",
+   "tf": "H1",
+   "tp": 0.56442,
+   "ts": "2026-09-29T06:00:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 1.32385,
@@ -2880,6 +2895,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 104,
+ "ref_seq": 105,
  "zones": []
 }
