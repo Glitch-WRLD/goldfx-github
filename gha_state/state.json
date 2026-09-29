@@ -52,6 +52,7 @@
   "GBPUSD:2026-09-27T22:00:00+00:00",
   "GBPUSD:2026-09-29T00:00:00+00:00",
   "GBPUSD:2026-09-29T04:00:00+00:00",
+  "GBPUSD:2026-09-29T05:00:00+00:00",
   "NZDUSD:2026-09-22T01:00:00+00:00",
   "NZDUSD:2026-09-23T01:00:00+00:00",
   "NZDUSD:2026-09-23T02:00:00+00:00",
@@ -80,6 +81,7 @@
   "USDCAD:2026-09-28T11:00:00+00:00",
   "USDCAD:2026-09-28T18:00:00+00:00",
   "USDCAD:2026-09-29T00:00:00+00:00",
+  "USDCAD:2026-09-29T05:00:00+00:00",
   "XAUUSD:2026-09-14T01:00:00+00:00",
   "XAUUSD:2026-09-14T02:30:00+00:00",
   "XAUUSD:2026-09-14T03:30:00+00:00",
@@ -141,6 +143,34 @@
   "XAUUSD:2026-09-28T08:00:00+00:00"
  ],
  "history": [
+  {
+   "dir": "SHORT",
+   "entry": 1.32385,
+   "profile": "balanced",
+   "ref": 104,
+   "rr": 2.37,
+   "sl": 1.3251088089579353,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "GBPUSD",
+   "tf": "H1",
+   "tp": 1.3208636674588905,
+   "ts": "2026-09-29T05:00:00+00:00"
+  },
+  {
+   "dir": "LONG",
+   "entry": 1.41874,
+   "profile": "balanced",
+   "ref": 103,
+   "rr": 1.99,
+   "sl": 1.4176044540554205,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "USDCAD",
+   "tf": "H1",
+   "tp": 1.4210017643224113,
+   "ts": "2026-09-29T05:00:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 1.324,
@@ -2850,6 +2880,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 102,
+ "ref_seq": 104,
  "zones": []
 }
