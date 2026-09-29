@@ -48,9 +48,9 @@ SYMBOL_RUNTIME = {
     "NZDUSD": {"entry_tf": "H1", "bias_htf": "H4", "strategy": "fvg_retest"},
     "AUDUSD": {"entry_tf": "H1", "bias_htf": "H4", "strategy": "fvg_retest"},
     "GBPUSD": {"entry_tf": "H1", "bias_htf": "H4", "strategy": "fvg_retest"},
+    "USDCHF": {"entry_tf": "H1", "bias_htf": "H4", "strategy": "fvg_retest"},
     # Liquidity Trap & Precision Sniper Engine (SMC Inducement Sweep)
     "EURUSD": {"entry_tf": "H1", "bias_htf": "H4", "strategy": "smc_sweep"},
-    "USDCHF": {"entry_tf": "H1", "bias_htf": "H4", "strategy": "smc_sweep"},
 }
 
 
