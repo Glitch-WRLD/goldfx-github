@@ -20,6 +20,7 @@
   "AUDUSD:2026-09-28T09:00:00+00:00",
   "AUDUSD:2026-09-28T23:00:00+00:00",
   "AUDUSD:2026-09-29T07:00:00+00:00",
+  "AUDUSD:2026-09-29T16:00:00+00:00",
   "EURUSD:2026-09-14T02:00:00+00:00",
   "EURUSD:2026-09-14T03:00:00+00:00",
   "EURUSD:2026-09-14T04:00:00+00:00",
@@ -54,6 +55,7 @@
   "GBPUSD:2026-09-29T00:00:00+00:00",
   "GBPUSD:2026-09-29T04:00:00+00:00",
   "GBPUSD:2026-09-29T05:00:00+00:00",
+  "GBPUSD:2026-09-29T16:00:00+00:00",
   "NZDUSD:2026-09-22T01:00:00+00:00",
   "NZDUSD:2026-09-23T01:00:00+00:00",
   "NZDUSD:2026-09-23T02:00:00+00:00",
@@ -67,6 +69,7 @@
   "NZDUSD:2026-09-28T23:00:00+00:00",
   "NZDUSD:2026-09-29T00:00:00+00:00",
   "NZDUSD:2026-09-29T06:00:00+00:00",
+  "NZDUSD:2026-09-29T16:00:00+00:00",
   "USDCAD:2026-09-22T12:00:00+00:00",
   "USDCAD:2026-09-22T15:00:00+00:00",
   "USDCAD:2026-09-22T17:00:00+00:00",
@@ -146,6 +149,48 @@
   "XAUUSD:2026-09-29T16:00:00+00:00"
  ],
  "history": [
+  {
+   "dir": "SHORT",
+   "entry": 1.32081,
+   "profile": "balanced",
+   "ref": 110,
+   "rr": 1.03,
+   "sl": 1.3221132380379084,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "GBPUSD",
+   "tf": "H1",
+   "tp": 1.3194727333734642,
+   "ts": "2026-09-29T16:00:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 0.69738,
+   "profile": "balanced",
+   "ref": 109,
+   "rr": 2.2,
+   "sl": 0.6988284543849204,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "AUDUSD",
+   "tf": "H1",
+   "tp": 0.6942001638611114,
+   "ts": "2026-09-29T16:00:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 0.56298,
+   "profile": "balanced",
+   "ref": 108,
+   "rr": 1.66,
+   "sl": 0.5644492490592193,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "NZDUSD",
+   "tf": "H1",
+   "tp": 0.5605390513170929,
+   "ts": "2026-09-29T16:00:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 4150.525,
@@ -2967,6 +3012,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 107,
+ "ref_seq": 110,
  "zones": []
 }
