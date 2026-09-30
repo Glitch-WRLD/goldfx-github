@@ -128,5 +128,9 @@ GOLD_REVERSAL_EXIT_ENABLED = os.getenv("GOLD_REVERSAL_EXIT_ENABLED", "1") == "1"
 GOLD_REVERSAL_MIN_MFE_R    = float(os.getenv("GOLD_REVERSAL_MIN_MFE_R", "0.5"))
 GOLD_REVERSAL_TF           = os.getenv("GOLD_REVERSAL_TF", "M15")
 
-# ---- Trade Protection (Breakeven) ----
-BREAKEVEN_MFE_R            = float(os.getenv("BREAKEVEN_MFE_R", "0.8"))  # Move SL to BE (+1 pip buffer) at >= 0.8R
+# ---- Trade Protection & Conservative Trailing (Option B) ----
+BREAKEVEN_MFE_R            = float(os.getenv("BREAKEVEN_MFE_R", "0.8"))      # Stage 1: Move SL to BE (+1 pip buffer) at >= 0.8R
+TRAIL_STAGE1_MFE_R         = float(os.getenv("TRAIL_STAGE1_MFE_R", "1.3"))   # Stage 2: Trail SL to +0.5R profit at >= 1.3R
+TRAIL_STAGE1_LOCK_R        = float(os.getenv("TRAIL_STAGE1_LOCK_R", "0.5"))  # Locked R for Stage 2 (+0.5R)
+TRAIL_STAGE2_MFE_R         = float(os.getenv("TRAIL_STAGE2_MFE_R", "1.6"))   # Stage 3: Trail SL to +1.0R profit at >= 1.6R
+TRAIL_STAGE2_LOCK_R        = float(os.getenv("TRAIL_STAGE2_LOCK_R", "1.0"))  # Locked R for Stage 3 (+1.0R)

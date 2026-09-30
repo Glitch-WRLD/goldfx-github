@@ -468,7 +468,13 @@ def manage_open_positions(ledger) -> int:
                     sl_state = pos.get("sl_state", "initial")
                     peak_mfe = float(pos.get("peak_mfe_r", 0.0))
 
-                    if reason == 5 or "[tp" in comment or pnl_raw > 0.5:
+                    if sl_state == "trail_10":
+                        hit = "tp"
+                        classification = "broker_trailed_profit_10"
+                    elif sl_state == "trail_05":
+                        hit = "tp"
+                        classification = "broker_trailed_profit_05"
+                    elif reason == 5 or "[tp" in comment or pnl_raw > 0.5:
                         hit = "tp"
                         classification = "broker_tp"
                     elif sl_state == "be" or "[be" in comment or abs(pnl_raw) < 1.0:
@@ -633,14 +639,81 @@ def manage_open_positions(ledger) -> int:
                                      ref, symbol, cur, mfe_r, realized_pnl)
                             continue
 
-        # 2. Breakeven protection: activate at >= 0.8R (Forex & Gold standard)
+        # 2. Progressive Trade Protection & Step-Trailing Stop (Option B: Conservative Profit Locker)
+        # Stage 1: At >= 0.8R -> Move SL to Break-Even (+1 pip buffer)
+        # Stage 2: At >= 1.3R -> Trail SL to +0.5R guaranteed profit (gives 0.8R breathing room to TP)
+        # Stage 3: At >= 1.6R -> Trail SL to +1.0R guaranteed profit (gives 0.4R breathing room to TP)
         be_threshold = float(getattr(config, "BREAKEVEN_MFE_R", 0.8))
-        if mfe_r >= be_threshold and sl_state != "be":
+        trail1_threshold = float(getattr(config, "TRAIL_STAGE1_MFE_R", 1.3))
+        trail1_lock = float(getattr(config, "TRAIL_STAGE1_LOCK_R", 0.5))
+        trail2_threshold = float(getattr(config, "TRAIL_STAGE2_MFE_R", 1.6))
+        trail2_lock = float(getattr(config, "TRAIL_STAGE2_LOCK_R", 1.0))
+
+        point = ex.get_point(symbol) if hasattr(ex, "get_point") else (0.01 if symbol == "XAUUSD" or "JPY" in symbol else 0.00001)
+        digits = 5 if point < 0.01 else 2
+
+        # Check Stage 3 (+1.0R lock)
+        if mfe_r >= trail2_threshold and sl_state != "trail_10":
+            pos["sl_state"] = "trail_10"
+            trail_sl = round(fill_price + (trail2_lock * risk), digits) if direction == 1 else round(fill_price - (trail2_lock * risk), digits)
+            pos["sl_protected"] = trail_sl
+            locked_usd = float(pos.get("risk_usd", 100.0)) * trail2_lock
+
+            if hasattr(ex, "modify_position"):
+                try:
+                    ex.modify_position(symbol, pos.get("order_id"), sl=trail_sl, tp=tp)
+                except Exception as me:
+                    log.warning("modify_position ref=%s error: %s", ref, me)
+            ledger.save()
+            actions += 1
+            msg = (
+                f"\U0001F3AF {symbol} \u2014 SL TRAILED TO +1.0R PROFIT"
+                f"\n{'\u2500' * 26}"
+                f"\nSetup #{ref} \u00b7 Peak profit +{mfe_r:.2f}R"
+                f"\nStop-loss locked at {trail_sl:.5f} (+{trail2_lock:.1f}R)"
+                f"\nGuaranteed Profit: ~${locked_usd:.2f} USD"
+                f"\nBroker: {pos.get('broker', 'mt5')}"
+                f"\n{'\u2500' * 26}"
+                f"\n\U0001F3C6 Auto-managed by GoldFX agent."
+            )
+            if CHAT_ID:
+                send(CHAT_ID, msg)
+            log.info("TRAILED ref=%s %s SL->+1.0R @ %.5f (peak +%.2fR, locked $%.2f)",
+                     ref, symbol, trail_sl, mfe_r, locked_usd)
+
+        # Check Stage 2 (+0.5R lock)
+        elif mfe_r >= trail1_threshold and sl_state not in ("trail_05", "trail_10"):
+            pos["sl_state"] = "trail_05"
+            trail_sl = round(fill_price + (trail1_lock * risk), digits) if direction == 1 else round(fill_price - (trail1_lock * risk), digits)
+            pos["sl_protected"] = trail_sl
+            locked_usd = float(pos.get("risk_usd", 100.0)) * trail1_lock
+
+            if hasattr(ex, "modify_position"):
+                try:
+                    ex.modify_position(symbol, pos.get("order_id"), sl=trail_sl, tp=tp)
+                except Exception as me:
+                    log.warning("modify_position ref=%s error: %s", ref, me)
+            ledger.save()
+            actions += 1
+            msg = (
+                f"\U0001F6E1\uFE0F {symbol} \u2014 SL TRAILED TO +0.5R PROFIT"
+                f"\n{'\u2500' * 26}"
+                f"\nSetup #{ref} \u00b7 Peak profit +{mfe_r:.2f}R"
+                f"\nStop-loss locked at {trail_sl:.5f} (+{trail1_lock:.1f}R)"
+                f"\nGuaranteed Profit: ~${locked_usd:.2f} USD"
+                f"\nBroker: {pos.get('broker', 'mt5')}"
+                f"\n{'\u2500' * 26}"
+                f"\n\U0001F3C6 Auto-managed by GoldFX agent."
+            )
+            if CHAT_ID:
+                send(CHAT_ID, msg)
+            log.info("TRAILED ref=%s %s SL->+0.5R @ %.5f (peak +%.2fR, locked $%.2f)",
+                     ref, symbol, trail_sl, mfe_r, locked_usd)
+
+        # Check Stage 1 (Break-Even +1 pip buffer)
+        elif mfe_r >= be_threshold and sl_state not in ("be", "trail_05", "trail_10"):
             pos["sl_state"] = "be"
-            # Calculate BE stop with +1 pip buffer (10 points) in profit direction to cover commissions & spread
-            point = ex.get_point(symbol) if hasattr(ex, "get_point") else (0.01 if symbol == "XAUUSD" or "JPY" in symbol else 0.00001)
             pip_buffer = 10 * point
-            digits = 5 if point < 0.01 else 2
             if direction == 1:
                 be_sl = round(fill_price + pip_buffer, digits)
             else:
@@ -669,11 +742,11 @@ def manage_open_positions(ledger) -> int:
             log.info("PROTECTED ref=%s %s SL->BE @ %.5f (+1 pip buffer, peak +%.2fR)",
                      ref, symbol, be_sl, mfe_r)
 
-        # 3. Breakeven exit: if price retraces back to entry/buffer after BE activation
-        elif sl_state == "be":
-            be_sl = float(pos.get("sl_protected", fill_price))
-            hit_be = (direction == 1 and cur <= be_sl) or (direction == -1 and cur >= be_sl)
-            if hit_be:
+        # 3. Protected exit: if price retraces back to protected stop (BE, +0.5R, or +1.0R)
+        elif sl_state in ("be", "trail_05", "trail_10"):
+            sl_protected = float(pos.get("sl_protected", fill_price))
+            hit_protected = (direction == 1 and cur <= sl_protected) or (direction == -1 and cur >= sl_protected)
+            if hit_protected:
                 order_id = pos.get("order_id")
                 try:
                     if hasattr(ex, "close_position_by_ticket") and order_id and str(order_id).isdigit():
@@ -681,23 +754,45 @@ def manage_open_positions(ledger) -> int:
                     else:
                         ex.close_position(symbol, direction, float(pos.get("lots", 0.01)))
                 except Exception as ce:
-                    log.error("BE close error ref=%s: %s", ref, ce)
-                ledger.record_outcome(ref, status="closed", hit="be",
-                                      exit_price=be_sl, pnl_usd=0.0,
-                                      classification="be_avoided_sl")
+                    log.error("Protected exit close error ref=%s: %s", ref, ce)
+
+                risk_usd = float(pos.get("risk_usd", 100.0))
+                if sl_state == "trail_10":
+                    hit = "tp"
+                    pnl = risk_usd * trail2_lock
+                    classification = "trailed_profit_10"
+                    icon = "\U0001F3AF"
+                    title = f"EXITED AT +{trail2_lock:.1f}R TRAILING PROFIT"
+                elif sl_state == "trail_05":
+                    hit = "tp"
+                    pnl = risk_usd * trail1_lock
+                    classification = "trailed_profit_05"
+                    icon = "\U0001F6E1\uFE0F"
+                    title = f"EXITED AT +{trail1_lock:.1f}R TRAILING PROFIT"
+                else:
+                    hit = "be"
+                    pnl = 0.0
+                    classification = "be_avoided_sl"
+                    icon = "\u26AA"
+                    title = "EXITED AT BREAKEVEN"
+
+                ledger.record_outcome(ref, status="closed", hit=hit,
+                                      exit_price=sl_protected, pnl_usd=pnl,
+                                      classification=classification)
                 actions += 1
                 msg = (
-                    f"\u26AA {symbol} \u2014 EXITED AT BREAKEVEN"
+                    f"{icon} {symbol} \u2014 {title}"
                     f"\n{'\u2500' * 26}"
-                    f"\nSetup #{ref} \u00b7 Exited at {be_sl:.5f}"
-                    f"\nP&L: ~0.00 USD (0.00R) \u00b7 Avoided full -1R Stop Loss!"
+                    f"\nSetup #{ref} \u00b7 Exited at {sl_protected:.5f}"
+                    f"\nP&L: {pnl:+.2f} USD \u00b7 Protected gain banked!"
                     f"\nBroker: {pos.get('broker', 'mt5')}"
                     f"\n{'\u2500' * 26}"
                     f"\n\u26A0\ufe0f Auto-managed by GoldFX agent."
                 )
                 if CHAT_ID:
                     send(CHAT_ID, msg)
-                log.info("EXITED_BE ref=%s %s @ %.5f (Avoided SL)", ref, symbol, be_sl)
+                log.info("EXITED_PROTECTED ref=%s %s @ %.5f (%s, pnl=$%.2f)",
+                         ref, symbol, sl_protected, classification, pnl)
 
     return actions
 
