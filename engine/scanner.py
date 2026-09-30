@@ -8,7 +8,12 @@ drives the loop and persists state).
 
 from __future__ import annotations
 
+import datetime as dt
+import json
+import logging
 import sys
+import time
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -16,12 +21,127 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import config
 from data.tv_data import get_df
 from engine.risk import RiskManager, format_decimal
 from strategy import candidates, indicators as ind
 from strategy.profiles import SYMBOL_RUNTIME, profile_for
 
+log = logging.getLogger("goldfx.scanner")
+
 FVG_SIGNALLER = candidates.STRATEGIES["fvg_retest"].signaller
+
+# --------------------------------------------------------------------------- DXY Macro Momentum Filter
+_DXY_CACHE: dict = {"ts": 0.0, "df": None}
+
+
+def fetch_dxy_df(tf: str = "M15", max_cache_age_sec: float = 60.0) -> pd.DataFrame | None:
+    """Fetch DXY candles from TradingView with Yahoo Finance fallback."""
+    now = time.time()
+    if _DXY_CACHE["df"] is not None and (now - _DXY_CACHE["ts"]) < max_cache_age_sec:
+        return _DXY_CACHE["df"]
+
+    df = None
+    # 1. TradingView
+    try:
+        from data.tv_data import get_df
+        df = get_df("DXY", tf, refresh=False)
+    except Exception:
+        pass
+
+    if df is not None and len(df) >= 30:
+        _DXY_CACHE["ts"] = now
+        _DXY_CACHE["df"] = df
+        return df
+
+    # 2. Yahoo Finance fallback (DX-Y.NYB)
+    try:
+        headers = {"User-Agent": "Mozilla/5.0"}
+        url = "https://query1.finance.yahoo.com/v8/finance/chart/DX-Y.NYB?range=5d&interval=15m"
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode())
+            res = data["chart"]["result"][0]
+            ts = [dt.datetime.fromtimestamp(t, dt.timezone.utc) for t in res["timestamp"]]
+            quote = res["indicators"]["quote"][0]
+            df_yf = pd.DataFrame({
+                "open": quote.get("open"),
+                "high": quote.get("high"),
+                "low": quote.get("low"),
+                "close": quote.get("close")
+            }, index=ts).dropna()
+            if not df_yf.empty and len(df_yf) >= 30:
+                _DXY_CACHE["ts"] = now
+                _DXY_CACHE["df"] = df_yf
+                return df_yf
+    except Exception:
+        pass
+
+    return _DXY_CACHE["df"]
+
+
+def get_dxy_trend(tf: str = "M15", ema_len: int = 21, as_of: pd.Timestamp | None = None) -> tuple[int, str]:
+    """Compute US Dollar Index trend: +1 BULLISH, -1 BEARISH, 0 UNAVAILABLE."""
+    df = fetch_dxy_df(tf=tf)
+    if df is None or df.empty:
+        return 0, "UNAVAILABLE"
+
+    if as_of is not None:
+        sub = df[df.index <= as_of]
+        if sub.empty or len(sub) < ema_len:
+            sub = df
+    else:
+        sub = df
+
+    if len(sub) < ema_len:
+        return 0, "INSUFFICIENT_BARS"
+
+    close = sub["close"]
+    ema = close.ewm(span=ema_len, adjust=False).mean()
+    c_val = float(close.iloc[-1])
+    e_val = float(ema.iloc[-1])
+
+    if c_val > e_val:
+        return 1, "BULLISH"
+    elif c_val < e_val:
+        return -1, "BEARISH"
+    else:
+        return 0, "NEUTRAL"
+
+
+def is_dxy_aligned(symbol: str, direction: int, dxy_trend: int, exempt_symbols: set[str] | None = None) -> tuple[bool, str]:
+    """Evaluate whether trade direction is aligned with the DXY momentum wave."""
+    if not getattr(config, "DXY_FILTER_ENABLED", True):
+        return True, "FILTER_DISABLED"
+
+    exempt = exempt_symbols if exempt_symbols is not None else getattr(
+        config, "DXY_EXEMPT_SYMBOLS", {"XAUUSD", "NASDAQ-100", "US500", "DJ30"}
+    )
+    if symbol in exempt:
+        return True, "EXEMPT"
+
+    if dxy_trend == 0:
+        return True, "DXY_UNAVAILABLE"
+
+    # Direct Forex pairs (USD is Quote): EURUSD, GBPUSD, AUDUSD, NZDUSD
+    direct_pairs = {"EURUSD", "GBPUSD", "AUDUSD", "NZDUSD"}
+    # Indirect Forex pairs (USD is Base): USDCAD, USDCHF, USDJPY
+    indirect_pairs = {"USDCAD", "USDCHF", "USDJPY"}
+
+    if symbol in direct_pairs:
+        # Bullish USD (+1) -> Expect pair to drop (-1) -> only SHORT is aligned
+        # Bearish USD (-1) -> Expect pair to rise (+1) -> only LONG is aligned
+        expected = -1 if dxy_trend == 1 else 1
+        ok = (direction == expected)
+        return ok, f"Direct ({symbol}: DXY {'+' if dxy_trend>0 else ''}{dxy_trend}, Expected {'+' if expected>0 else ''}{expected}, Got {'+' if direction>0 else ''}{direction})"
+    elif symbol in indirect_pairs:
+        # Bullish USD (+1) -> Expect pair to rise (+1) -> only LONG is aligned
+        # Bearish USD (-1) -> Expect pair to drop (-1) -> only SHORT is aligned
+        expected = 1 if dxy_trend == 1 else -1
+        ok = (direction == expected)
+        return ok, f"Indirect ({symbol}: DXY {'+' if dxy_trend>0 else ''}{dxy_trend}, Expected {'+' if expected>0 else ''}{expected}, Got {'+' if direction>0 else ''}{direction})"
+
+    return True, "UNKNOWN_SYMBOL"
 
 
 @dataclass
@@ -48,6 +168,8 @@ class ScanSignal:
     ltf_tf: str = ""
     strategy_type: str = "fvg_retest"          # "fvg_retest", "smc_sweep", "dual_confluence"
     strategy_badge: str = "⚡ Momentum FVG"    # User-facing badge
+    dxy_aligned: bool = True
+    dxy_trend_label: str = ""
 
 
 @dataclass
@@ -156,8 +278,23 @@ class FVGScanner:
         if rr < min_rr_floor:
             return None
 
-        rd = self.risk.evaluate(symbol, side, entry, sl, tp, now_utc_day=None,
+        # DXY Macro Momentum Filter (Forex Pairs Only):
+        # Excludes Gold and Indices to allow safe-haven and independent equity trends.
+        dxy_trend_label = ""
+        if getattr(config, "DXY_FILTER_ENABLED", True):
+            exempt = getattr(config, "DXY_EXEMPT_SYMBOLS", {"XAUUSD", "NASDAQ-100", "US500", "DJ30"})
+            if symbol not in exempt:
+                tf_dxy = getattr(config, "DXY_FILTER_TF", "M15")
+                ema_dxy = getattr(config, "DXY_FILTER_EMA", 21)
+                dxy_trend, dxy_lbl = get_dxy_trend(tf=tf_dxy, ema_len=ema_dxy, as_of=sig.ts)
+                aligned, dxy_reason = is_dxy_aligned(symbol, side, dxy_trend)
+                if not aligned:
+                    log.info("DXY_FILTER_SKIP: %s %s at %s rejected (%s, DXY %s). Win rate protected.",
+                             symbol, "LONG" if side == 1 else "SHORT", sig.ts, dxy_reason, dxy_lbl)
+                    return None
+                dxy_trend_label = dxy_lbl
 
+        rd = self.risk.evaluate(symbol, side, entry, sl, tp, now_utc_day=None,
                                 realized_wr=None)
         if not rd.ok:
             return None
@@ -186,6 +323,7 @@ class FVGScanner:
             messages=rd.messages, confidence=conf, confidence_label=conf_label,
             ltf_confirmed=ltf_confirmed, ltf_tf=ltf_tf,
             strategy_type=strat_type, strategy_badge=strat_badge,
+            dxy_aligned=True, dxy_trend_label=dxy_trend_label,
         )
 
 
@@ -455,12 +593,13 @@ def format_message(sig: ScanSignal, ref: int | None = None) -> str:
         + f"\nConfidence: {sig.confidence}% {sig.confidence_label}  [{conf_bar}]\n"
         f"{'\u2500' * 26}"
     )
+    dxy_tag = f" · 💵 DXY {sig.dxy_trend_label} Flow" if getattr(sig, "dxy_trend_label", "") else ""
     body = (
         f"\n\U0001F4CC Entry zone   {e}  @ market open"
         f"\n\U0001F6D1 Stop-loss    {sl}   (risk {sig.risk_pct:.1f}%)"
         f"\n\U0001F3AF Take-profit  {tp}   (R:R 1 : {sig.rr:.2f})\n"
         f"{'\u2500' * 26}\n"
-        f"📊 {sig.reason} · {sig.entry_tf} setup, {sig.bias_htf} bias\n"
+        f"📊 {sig.reason}{dxy_tag} · {sig.entry_tf} setup, {sig.bias_htf} bias\n"
         f"🕐 Candle Open: {captured} (Accra / GMT)\n"
     )
 

@@ -19,6 +19,7 @@ SYMBOLS = {
     "NASDAQ-100": "PEPPERSTONE:NAS100",
     "US500": "CAPITALCOM:US500",
     "DJ30": "CAPITALCOM:US30",
+    "DXY": "TVC:DXY",
 }
 # map brand names -> tradingview-sdk Interval
 TIMEFRAMES = ["M15", "M30", "H1", "H2"]
@@ -78,6 +79,10 @@ CONTRACTS = {
     "USDCAD": {"point": 0.00001, "pip_value_per_lot_usd": 7.4 / 10, "digits": 5},
     "NZDUSD": {"point": 0.00001, "pip_value_per_lot_usd": 10.0 / 10, "digits": 5},
     "USDCHF": {"point": 0.00001, "pip_value_per_lot_usd": 11.0 / 10, "digits": 5},
+    "NASDAQ-100": {"point": 0.01, "pip_value_per_lot_usd": 0.10, "digits": 2},
+    "US500": {"point": 0.01, "pip_value_per_lot_usd": 0.10, "digits": 2},
+    "DJ30": {"point": 0.01, "pip_value_per_lot_usd": 0.10, "digits": 2},
+    "DXY": {"point": 0.001, "pip_value_per_lot_usd": 1.0, "digits": 3},
 }
 
 # ---- Auto-trading agent (Windows MT5 / OANDA / paper) ----
@@ -138,3 +143,9 @@ TRAIL_STAGE1_MFE_R         = float(os.getenv("TRAIL_STAGE1_MFE_R", "1.3"))   # S
 TRAIL_STAGE1_LOCK_R        = float(os.getenv("TRAIL_STAGE1_LOCK_R", "0.5"))  # Locked R for Stage 2 (+0.5R)
 TRAIL_STAGE2_MFE_R         = float(os.getenv("TRAIL_STAGE2_MFE_R", "1.6"))   # Stage 3: Trail SL to +1.0R profit at >= 1.6R
 TRAIL_STAGE2_LOCK_R        = float(os.getenv("TRAIL_STAGE2_LOCK_R", "1.0"))  # Locked R for Stage 3 (+1.0R)
+
+# ---- DXY Macro Momentum Filter (Forex Pairs Only) ----
+DXY_FILTER_ENABLED         = os.getenv("DXY_FILTER_ENABLED", "1") == "1"     # 1 = Filter pure Forex by US Dollar index momentum
+DXY_FILTER_TF              = os.getenv("DXY_FILTER_TF", "M15")               # M15 momentum baseline (+60.3% win rate in empirical audit)
+DXY_FILTER_EMA             = int(os.getenv("DXY_FILTER_EMA", "21"))          # EMA 21 trend filter
+DXY_EXEMPT_SYMBOLS         = {"XAUUSD", "NASDAQ-100", "US500", "DJ30"}       # Decoupled / Independent assets exempt from DXY filter

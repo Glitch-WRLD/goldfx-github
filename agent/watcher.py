@@ -1202,6 +1202,24 @@ def tick() -> bool:
                      symbol, ref_key, getattr(config, "ROLLOVER_START_UTC", "20:55"), getattr(config, "ROLLOVER_END_UTC", "22:15"))
             continue
 
+        # DXY Macro Momentum Defense (Forex Pairs Only):
+        # Double-checks live US Dollar momentum before firing into MT5 broker.
+        # Exempts Gold and Equity Indices to preserve independent safe-haven / momentum runs.
+        if getattr(config, "DXY_FILTER_ENABLED", True):
+            exempt = getattr(config, "DXY_EXEMPT_SYMBOLS", {"XAUUSD", "NASDAQ-100", "US500", "DJ30"})
+            if symbol not in exempt:
+                from engine.scanner import get_dxy_trend, is_dxy_aligned
+                tf_dxy = getattr(config, "DXY_FILTER_TF", "M15")
+                ema_dxy = getattr(config, "DXY_FILTER_EMA", 21)
+                dxy_val, dxy_lbl = get_dxy_trend(tf=tf_dxy, ema_len=ema_dxy)
+                aligned, dxy_reason = is_dxy_aligned(symbol, direction, dxy_val)
+                if not aligned:
+                    log.info("🛡️ DXY_FILTER_BLOCK %s ref=%s — live DXY opposes trade (%s, DXY %s). MT5 execution blocked.",
+                             symbol, ref_key, dxy_reason, dxy_lbl)
+                    ledger.record_outcome(ref_key, status="skipped", hit="dxy_counter_trend",
+                                          pnl_usd=0.0, classification="dxy_momentum_filter")
+                    continue
+
         try:
             ex = get_executor()
 
