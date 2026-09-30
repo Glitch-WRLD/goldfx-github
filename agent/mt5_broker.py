@@ -351,6 +351,12 @@ class Mt5Broker:
                 }
                 res = mt5.order_send(req)
                 retcode = getattr(res, "retcode", None) if not isinstance(res, dict) else res.get("retcode")
+                if retcode not in _DONE_CODES:
+                    log.warning("modify_position failed: symbol=%s ticket=%s sl=%.5f tp=%.5f retcode=%s comment=%s",
+                                symbol, pos.ticket, sl, req["tp"], retcode, getattr(res, "comment", ""))
+                else:
+                    log.info("modify_position success: symbol=%s ticket=%s sl=%.5f tp=%.5f",
+                             symbol, pos.ticket, sl, req["tp"])
                 return bool(res is not None and retcode in _DONE_CODES)
         return False
 

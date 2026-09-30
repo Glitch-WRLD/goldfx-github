@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """GoldFX auto-trading agent: watcher loop.
 
 Polls ``state.json`` from the public GitHub repo on a short interval, diffs
@@ -450,6 +451,15 @@ def reconcile_outcomes(ledger, outcomes: dict) -> int:
     """Check state.json outcomes for TP/SL hits on open ledger positions.
     Returns count of positions closed this tick."""
     closed = 0
+    ex = get_executor()
+    active_broker_tickets = None
+    if hasattr(ex, "get_open_positions"):
+        try:
+            bps = ex.get_open_positions()
+            active_broker_tickets = {str(p["ticket"]) for p in bps} if bps is not None else None
+        except Exception:
+            pass
+
     for key, o in outcomes.items():
         hit = o.get("hit")
         if hit not in ("tp", "sl"):
@@ -458,6 +468,14 @@ def reconcile_outcomes(ledger, outcomes: dict) -> int:
             # outcome key = "SYMBOL:delivered_ts"; match on the ts stored at fill
             if pos.get("signal_ts") and f"{pos.get('symbol')}:{pos.get('signal_ts')}" != key:
                 continue
+
+            order_id = pos.get("order_id")
+            # If the trade has an active ticket running on MT5, broker truth takes precedence!
+            if active_broker_tickets is not None and order_id and str(order_id) in active_broker_tickets:
+                log.debug("RECONCILE_WAIT: ref=%s ticket=%s still active on MT5 broker (state.json hit=%s). Keeping position open & active.",
+                          ref, order_id, hit)
+                continue
+
             # Determine PnL from the RR/risk already captured at fill time
             rr = float(pos.get("rr", 0.0))
             risk_usd = float(pos.get("risk_usd", 0.0))
@@ -509,10 +527,6 @@ def manage_open_positions(ledger) -> int:
     - Exits at BE (0.0R) if price reverses back to entry after reaching BE protection
     - Tracks peak MFE for SL classification
     """
-    open_trades = list(ledger.open_entries().items())
-    if not open_trades:
-        return 0
-
     ex = get_executor()
     actions = 0
 
@@ -524,6 +538,28 @@ def manage_open_positions(ledger) -> int:
             active_broker_tickets = {str(p["ticket"]) for p in bps} if bps is not None else None
         except Exception as be:
             log.debug("get_open_positions check failed: %s", be)
+
+    # Broker synchronization: if a position with a live MT5 ticket is marked non-open, revive it to open
+    if active_broker_tickets is not None:
+        revived = False
+        for ref_str, pos_item in list(ledger.data.items()):
+            if pos_item.get("status") != "open" and pos_item.get("order_id"):
+                if str(pos_item["order_id"]) in active_broker_tickets:
+                    log.warning("RESYNC_REVIVE: ref=%s ticket=%s still active on MT5 broker! Restoring status to 'open'.",
+                                ref_str, pos_item["order_id"])
+                    pos_item["status"] = "open"
+                    pos_item.pop("closed_ts", None)
+                    pos_item.pop("hit", None)
+                    pos_item.pop("exit_price", None)
+                    pos_item.pop("pnl_usd", None)
+                    pos_item.pop("classification", None)
+                    revived = True
+        if revived:
+            ledger.save()
+
+    open_trades = list(ledger.open_entries().items())
+    if not open_trades:
+        return 0
 
     for ref, pos in open_trades:
         order_id = pos.get("order_id")
@@ -724,7 +760,7 @@ def manage_open_positions(ledger) -> int:
         digits = 5 if point < 0.01 else 2
 
         # Check Stage 3 (+1.0R lock)
-        if mfe_r >= trail2_threshold and sl_state != "trail_10":
+        if (mfe_r >= trail2_threshold or peak_mfe >= trail2_threshold) and sl_state != "trail_10":
             pos["sl_state"] = "trail_10"
             trail_sl = round(fill_price + (trail2_lock * risk), digits) if direction == 1 else round(fill_price - (trail2_lock * risk), digits)
             pos["sl_protected"] = trail_sl
@@ -753,7 +789,7 @@ def manage_open_positions(ledger) -> int:
                      ref, symbol, trail_sl, mfe_r, locked_usd)
 
         # Check Stage 2 (+0.5R lock)
-        elif mfe_r >= trail1_threshold and sl_state not in ("trail_05", "trail_10"):
+        elif (mfe_r >= trail1_threshold or peak_mfe >= trail1_threshold) and sl_state not in ("trail_05", "trail_10"):
             pos["sl_state"] = "trail_05"
             trail_sl = round(fill_price + (trail1_lock * risk), digits) if direction == 1 else round(fill_price - (trail1_lock * risk), digits)
             pos["sl_protected"] = trail_sl
@@ -782,36 +818,48 @@ def manage_open_positions(ledger) -> int:
                      ref, symbol, trail_sl, mfe_r, locked_usd)
 
         # Check Stage 1 (Break-Even +1 pip buffer)
-        elif mfe_r >= be_threshold and sl_state not in ("be", "trail_05", "trail_10"):
-            pos["sl_state"] = "be"
-            pip_buffer = 10 * point
+        elif (mfe_r >= be_threshold or peak_mfe >= be_threshold) and sl_state not in ("be", "trail_05", "trail_10"):
+            is_index = symbol in getattr(config, "INDEX_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"})
+            if symbol == "XAUUSD":
+                pip_buffer = 0.50
+            elif is_index:
+                pip_buffer = 1.00
+            else:
+                pip_buffer = 10 * point
+
             if direction == 1:
                 be_sl = round(fill_price + pip_buffer, digits)
             else:
                 be_sl = round(fill_price - pip_buffer, digits)
-            pos["sl_protected"] = be_sl
 
+            mod_ok = True
             if hasattr(ex, "modify_position"):
                 try:
-                    ex.modify_position(symbol, pos.get("order_id"), sl=be_sl, tp=tp)
+                    mod_ok = ex.modify_position(symbol, pos.get("order_id"), sl=be_sl, tp=tp)
                 except Exception as me:
                     log.warning("modify_position ref=%s error: %s", ref, me)
-            ledger.save()
-            actions += 1
-            msg = (
-                f"\U0001F6E1\uFE0F {symbol} \u2014 SL MOVED TO BREAKEVEN (+1 PIP BUFFER)"
-                f"\n{'\u2500' * 26}"
-                f"\nSetup #{ref} \u00b7 Peak profit +{mfe_r:.2f}R"
-                f"\nStop-loss adjusted to {be_sl:.5f} (Entry: {fill_price:.5f})"
-                f"\nRisk-Free: spread & broker costs protected!"
-                f"\nBroker: {pos.get('broker', 'mt5')}"
-                f"\n{'\u2500' * 26}"
-                f"\n\u26A0\ufe0f Auto-managed by GoldFX agent."
-            )
-            if CHAT_ID:
-                send(CHAT_ID, msg)
-            log.info("PROTECTED ref=%s %s SL->BE @ %.5f (+1 pip buffer, peak +%.2fR)",
-                     ref, symbol, be_sl, mfe_r)
+                    mod_ok = False
+
+            if mod_ok:
+                pos["sl_state"] = "be"
+                pos["sl_protected"] = be_sl
+                ledger.save()
+                actions += 1
+                best_mfe = max(mfe_r, peak_mfe)
+                msg = (
+                    f"\U0001F6E1\uFE0F {symbol} \u2014 SL MOVED TO BREAKEVEN (+1 PIP BUFFER)"
+                    f"\n{'\u2500' * 26}"
+                    f"\nSetup #{ref} \u00b7 Peak profit +{best_mfe:.2f}R"
+                    f"\nStop-loss adjusted to {be_sl:.5f} (Entry: {fill_price:.5f})"
+                    f"\nRisk-Free: spread & broker costs protected!"
+                    f"\nBroker: {pos.get('broker', 'mt5')}"
+                    f"\n{'\u2500' * 26}"
+                    f"\n\u26A0\ufe0f Auto-managed by GoldFX agent."
+                )
+                if CHAT_ID:
+                    send(CHAT_ID, msg)
+                log.info("PROTECTED ref=%s %s SL->BE @ %.5f (+1 pip buffer, peak +%.2fR)",
+                         ref, symbol, be_sl, best_mfe)
 
         # 3. Protected exit: if price retraces back to protected stop (BE, +0.5R, or +1.0R)
         elif sl_state in ("be", "trail_05", "trail_10"):
@@ -873,7 +921,7 @@ def process_pending_retracements(ledger) -> int:
     - Checks invalidation: 75% TP reached before entry -> expire
     - Checks invalidation: original SL breached before entry -> save full loss ($0 loss)
     - Checks age timeout: 6 hours
-    - Detects 25%–50% pullback into setup range
+    - Detects 25%-50% pullback into setup range
     - Looks for M5 reversal candle (engulfing/shift)
     - Sets tight structural SL behind local M5 swing low/high
     - Fires 0.01 lot order if risk <= RETRACE_MAX_RISK_USD ($7.50 cap, ~$4.50 avg)
@@ -898,6 +946,14 @@ def process_pending_retracements(ledger) -> int:
     still_pending = {}
 
     for ref_key, item in pending.items():
+        # Clean up: if ref_key is already filled/active on broker, do NOT re-process or falsely invalidate!
+        if ledger.has(ref_key):
+            pos_rec = ledger.data.get(str(ref_key), {})
+            if pos_rec.get("status") == "open" or pos_rec.get("order_id"):
+                log.info("RETRACE_CLEANUP: ref=%s already active on broker (ticket %s); removing from pending queue.",
+                         ref_key, pos_rec.get("order_id"))
+                continue
+
         symbol = item.get("symbol", "XAUUSD")
         direction = int(item.get("direction", 1))
         entry_delivered = float(item.get("entry_delivered", 0))
@@ -1570,6 +1626,13 @@ def tick() -> bool:
             "ltf_confirmed": entry.get("ltf_confirmed", False),
         }
         ledger.save()
+        try:
+            pending_retrace = _load_pending_retrace()
+            if str(ref_key) in pending_retrace:
+                del pending_retrace[str(ref_key)]
+                _save_pending_retrace(pending_retrace)
+        except Exception:
+            pass
         msg = _format_fill_message(fill, entry)
         if CHAT_ID:
             send(CHAT_ID, msg)
