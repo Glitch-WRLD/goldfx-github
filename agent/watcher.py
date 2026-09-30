@@ -648,12 +648,21 @@ def manage_open_positions(ledger) -> int:
         if not cur:
             continue
 
-        # Current MFE in R
-        mfe_r = (cur - fill_price) / risk if direction == 1 else (fill_price - cur) / risk
+        # Current MFE in R and Percentage of TP
+        target_dist = abs(tp - fill_price)
+        mfe_pts = (cur - fill_price) if direction == 1 else (fill_price - cur)
+        mfe_r = mfe_pts / risk if risk > 0 else 0.0
+        pct_tp = (mfe_pts / target_dist * 100.0) if target_dist > 0 else 0.0
+
         prev_peak = float(pos.get("peak_mfe_r", 0.0))
         peak_mfe = max(prev_peak, mfe_r)
         if round(peak_mfe, 2) > prev_peak:
             pos["peak_mfe_r"] = round(peak_mfe, 2)
+
+        prev_peak_pct = float(pos.get("peak_pct_tp", 0.0))
+        peak_pct_tp = max(prev_peak_pct, pct_tp)
+        if round(peak_pct_tp, 1) > prev_peak_pct:
+            pos["peak_pct_tp"] = round(peak_pct_tp, 1)
             ledger.save()
 
         # 0. Local TP Guard (Spread-Proof Take Profit Execution)
@@ -746,10 +755,15 @@ def manage_open_positions(ledger) -> int:
                                      ref, symbol, cur, mfe_r, realized_pnl)
                             continue
 
-        # 2. Progressive Trade Protection & Step-Trailing Stop (Option B: Conservative Profit Locker)
-        # Stage 1: At >= 0.8R -> Move SL to Break-Even (+1 pip buffer)
-        # Stage 2: At >= 1.3R -> Trail SL to +0.5R guaranteed profit (gives 0.8R breathing room to TP)
-        # Stage 3: At >= 1.6R -> Trail SL to +1.0R guaranteed profit (gives 0.4R breathing room to TP)
+        # 2. Progressive Trade Protection & Step-Trailing Stop (Percentage-of-TP Engine)
+        trail_mode = getattr(config, "TRAIL_MODE", "PERCENTAGE")
+        be_pct = float(getattr(config, "BREAKEVEN_PCT_TP", 50.0))
+        t1_pct = float(getattr(config, "TRAIL_STAGE1_PCT_TP", 75.0))
+        t1_lock_pct = float(getattr(config, "TRAIL_STAGE1_LOCK_PCT", 50.0)) / 100.0
+        t2_pct = float(getattr(config, "TRAIL_STAGE2_PCT_TP", 90.0))
+        t2_lock_pct = float(getattr(config, "TRAIL_STAGE2_LOCK_PCT", 75.0)) / 100.0
+
+        # Fallback / Fixed R parameters
         be_threshold = float(getattr(config, "BREAKEVEN_MFE_R", 0.8))
         trail1_threshold = float(getattr(config, "TRAIL_STAGE1_MFE_R", 1.3))
         trail1_lock = float(getattr(config, "TRAIL_STAGE1_LOCK_R", 0.5))
@@ -758,67 +772,87 @@ def manage_open_positions(ledger) -> int:
 
         point = ex.get_point(symbol) if hasattr(ex, "get_point") else (0.01 if symbol == "XAUUSD" or "JPY" in symbol else 0.00001)
         digits = 5 if point < 0.01 else 2
+        rr = float(pos.get("rr", 1.0))
 
-        # Check Stage 3 (+1.0R lock)
-        if (mfe_r >= trail2_threshold or peak_mfe >= trail2_threshold) and sl_state != "trail_10":
+        if trail_mode == "PERCENTAGE":
+            is_stage3 = (pct_tp >= t2_pct or peak_pct_tp >= t2_pct)
+            is_stage2 = (pct_tp >= t1_pct or peak_pct_tp >= t1_pct)
+            is_stage1 = (pct_tp >= be_pct or peak_pct_tp >= be_pct)
+            trail_stage3_sl = round(fill_price + (t2_lock_pct * target_dist), digits) if direction == 1 else round(fill_price - (t2_lock_pct * target_dist), digits)
+            trail_stage2_sl = round(fill_price + (t1_lock_pct * target_dist), digits) if direction == 1 else round(fill_price - (t1_lock_pct * target_dist), digits)
+            s3_locked_usd = float(pos.get("risk_usd", 100.0)) * (rr * t2_lock_pct)
+            s2_locked_usd = float(pos.get("risk_usd", 100.0)) * (rr * t1_lock_pct)
+            s3_label = f"75% of target ({rr * t2_lock_pct:.2f}R)"
+            s2_label = f"50% of target ({rr * t1_lock_pct:.2f}R)"
+        else:
+            is_stage3 = (mfe_r >= trail2_threshold or peak_mfe >= trail2_threshold)
+            is_stage2 = (mfe_r >= trail1_threshold or peak_mfe >= trail1_threshold)
+            is_stage1 = (mfe_r >= be_threshold or peak_mfe >= be_threshold)
+            trail_stage3_sl = round(fill_price + (trail2_lock * risk), digits) if direction == 1 else round(fill_price - (trail2_lock * risk), digits)
+            trail_stage2_sl = round(fill_price + (trail1_lock * risk), digits) if direction == 1 else round(fill_price - (trail1_lock * risk), digits)
+            s3_locked_usd = float(pos.get("risk_usd", 100.0)) * trail2_lock
+            s2_locked_usd = float(pos.get("risk_usd", 100.0)) * trail1_lock
+            s3_label = f"+{trail2_lock:.1f}R"
+            s2_label = f"+{trail1_lock:.1f}R"
+
+        # Check Stage 3 (Lock 75% profit / +1.0R)
+        if is_stage3 and sl_state != "trail_10":
             pos["sl_state"] = "trail_10"
-            trail_sl = round(fill_price + (trail2_lock * risk), digits) if direction == 1 else round(fill_price - (trail2_lock * risk), digits)
-            pos["sl_protected"] = trail_sl
-            locked_usd = float(pos.get("risk_usd", 100.0)) * trail2_lock
-
+            pos["sl_protected"] = trail_stage3_sl
             if hasattr(ex, "modify_position"):
                 try:
-                    ex.modify_position(symbol, pos.get("order_id"), sl=trail_sl, tp=tp)
+                    ex.modify_position(symbol, pos.get("order_id"), sl=trail_stage3_sl, tp=tp)
                 except Exception as me:
                     log.warning("modify_position ref=%s error: %s", ref, me)
             ledger.save()
             actions += 1
+            best_pct = max(pct_tp, peak_pct_tp)
+            best_mfe = max(mfe_r, peak_mfe)
             msg = (
-                f"\U0001F3AF {symbol} \u2014 SL TRAILED TO +1.0R PROFIT"
+                f"\U0001F3AF {symbol} \u2014 SL TRAILED TO LOCK PROFIT (STAGE 3)"
                 f"\n{'\u2500' * 26}"
-                f"\nSetup #{ref} \u00b7 Peak profit +{mfe_r:.2f}R"
-                f"\nStop-loss locked at {trail_sl:.5f} (+{trail2_lock:.1f}R)"
-                f"\nGuaranteed Profit: ~${locked_usd:.2f} USD"
+                f"\nSetup #{ref} \u00b7 Target progress: {best_pct:.0f}% (+{best_mfe:.2f}R)"
+                f"\nStop-loss locked at {trail_stage3_sl:.5f} ({s3_label})"
+                f"\nGuaranteed Profit: ~${s3_locked_usd:.2f} USD"
                 f"\nBroker: {pos.get('broker', 'mt5')}"
                 f"\n{'\u2500' * 26}"
                 f"\n\U0001F3C6 Auto-managed by GoldFX agent."
             )
             if CHAT_ID:
                 send(CHAT_ID, msg)
-            log.info("TRAILED ref=%s %s SL->+1.0R @ %.5f (peak +%.2fR, locked $%.2f)",
-                     ref, symbol, trail_sl, mfe_r, locked_usd)
+            log.info("TRAILED ref=%s %s SL->Stage3 @ %.5f (progress %.0f%%, peak +%.2fR, locked $%.2f)",
+                     ref, symbol, trail_stage3_sl, best_pct, best_mfe, s3_locked_usd)
 
-        # Check Stage 2 (+0.5R lock)
-        elif (mfe_r >= trail1_threshold or peak_mfe >= trail1_threshold) and sl_state not in ("trail_05", "trail_10"):
+        # Check Stage 2 (Lock 50% profit / +0.5R)
+        elif is_stage2 and sl_state not in ("trail_05", "trail_10"):
             pos["sl_state"] = "trail_05"
-            trail_sl = round(fill_price + (trail1_lock * risk), digits) if direction == 1 else round(fill_price - (trail1_lock * risk), digits)
-            pos["sl_protected"] = trail_sl
-            locked_usd = float(pos.get("risk_usd", 100.0)) * trail1_lock
-
+            pos["sl_protected"] = trail_stage2_sl
             if hasattr(ex, "modify_position"):
                 try:
-                    ex.modify_position(symbol, pos.get("order_id"), sl=trail_sl, tp=tp)
+                    ex.modify_position(symbol, pos.get("order_id"), sl=trail_stage2_sl, tp=tp)
                 except Exception as me:
                     log.warning("modify_position ref=%s error: %s", ref, me)
             ledger.save()
             actions += 1
+            best_pct = max(pct_tp, peak_pct_tp)
+            best_mfe = max(mfe_r, peak_mfe)
             msg = (
-                f"\U0001F6E1\uFE0F {symbol} \u2014 SL TRAILED TO +0.5R PROFIT"
+                f"\U0001F6E1\uFE0F {symbol} \u2014 SL TRAILED TO LOCK PROFIT (STAGE 2)"
                 f"\n{'\u2500' * 26}"
-                f"\nSetup #{ref} \u00b7 Peak profit +{mfe_r:.2f}R"
-                f"\nStop-loss locked at {trail_sl:.5f} (+{trail1_lock:.1f}R)"
-                f"\nGuaranteed Profit: ~${locked_usd:.2f} USD"
+                f"\nSetup #{ref} \u00b7 Target progress: {best_pct:.0f}% (+{best_mfe:.2f}R)"
+                f"\nStop-loss locked at {trail_stage2_sl:.5f} ({s2_label})"
+                f"\nGuaranteed Profit: ~${s2_locked_usd:.2f} USD"
                 f"\nBroker: {pos.get('broker', 'mt5')}"
                 f"\n{'\u2500' * 26}"
                 f"\n\U0001F3C6 Auto-managed by GoldFX agent."
             )
             if CHAT_ID:
                 send(CHAT_ID, msg)
-            log.info("TRAILED ref=%s %s SL->+0.5R @ %.5f (peak +%.2fR, locked $%.2f)",
-                     ref, symbol, trail_sl, mfe_r, locked_usd)
+            log.info("TRAILED ref=%s %s SL->Stage2 @ %.5f (progress %.0f%%, peak +%.2fR, locked $%.2f)",
+                     ref, symbol, trail_stage2_sl, best_pct, best_mfe, s2_locked_usd)
 
-        # Check Stage 1 (Break-Even +1 pip buffer)
-        elif (mfe_r >= be_threshold or peak_mfe >= be_threshold) and sl_state not in ("be", "trail_05", "trail_10"):
+        # Check Stage 1 (Break-Even +1 pip buffer at 50% TP)
+        elif is_stage1 and sl_state not in ("be", "trail_05", "trail_10"):
             is_index = symbol in getattr(config, "INDEX_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"})
             if symbol == "XAUUSD":
                 pip_buffer = 0.50
@@ -846,10 +880,11 @@ def manage_open_positions(ledger) -> int:
                 ledger.save()
                 actions += 1
                 best_mfe = max(mfe_r, peak_mfe)
+                best_pct = max(pct_tp, peak_pct_tp)
                 msg = (
                     f"\U0001F6E1\uFE0F {symbol} \u2014 SL MOVED TO BREAKEVEN (+1 PIP BUFFER)"
                     f"\n{'\u2500' * 26}"
-                    f"\nSetup #{ref} \u00b7 Peak profit +{best_mfe:.2f}R"
+                    f"\nSetup #{ref} \u00b7 Target progress: {best_pct:.0f}% (+{best_mfe:.2f}R)"
                     f"\nStop-loss adjusted to {be_sl:.5f} (Entry: {fill_price:.5f})"
                     f"\nRisk-Free: spread & broker costs protected!"
                     f"\nBroker: {pos.get('broker', 'mt5')}"
@@ -858,8 +893,8 @@ def manage_open_positions(ledger) -> int:
                 )
                 if CHAT_ID:
                     send(CHAT_ID, msg)
-                log.info("PROTECTED ref=%s %s SL->BE @ %.5f (+1 pip buffer, peak +%.2fR)",
-                         ref, symbol, be_sl, best_mfe)
+                log.info("PROTECTED ref=%s %s SL->BE @ %.5f (+1 pip buffer, progress %.0f%%, peak +%.2fR)",
+                         ref, symbol, be_sl, best_pct, best_mfe)
 
         # 3. Protected exit: if price retraces back to protected stop (BE, +0.5R, or +1.0R)
         elif sl_state in ("be", "trail_05", "trail_10"):

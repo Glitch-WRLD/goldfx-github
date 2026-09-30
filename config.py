@@ -140,7 +140,15 @@ GOLD_REVERSAL_EXIT_ENABLED = os.getenv("GOLD_REVERSAL_EXIT_ENABLED", "1") == "1"
 GOLD_REVERSAL_MIN_MFE_R    = float(os.getenv("GOLD_REVERSAL_MIN_MFE_R", "0.5"))
 GOLD_REVERSAL_TF           = os.getenv("GOLD_REVERSAL_TF", "M15")
 
-# ---- Trade Protection & Conservative Trailing (Option B) ----
+# ---- Trade Protection & Progressive Trailing (Percentage-of-TP Engine) ----
+TRAIL_MODE                 = os.getenv("TRAIL_MODE", "PERCENTAGE")            # "PERCENTAGE" (proportional to TP) or "FIXED_R"
+BREAKEVEN_PCT_TP           = float(os.getenv("BREAKEVEN_PCT_TP", "50.0"))     # Stage 1: Move SL to BE (+1 pip) when price reaches >= 50% of TP
+TRAIL_STAGE1_PCT_TP        = float(os.getenv("TRAIL_STAGE1_PCT_TP", "75.0"))  # Stage 2: Trail SL when price reaches >= 75% of TP
+TRAIL_STAGE1_LOCK_PCT      = float(os.getenv("TRAIL_STAGE1_LOCK_PCT", "50.0"))# Lock in 50% of target profit at Stage 2
+TRAIL_STAGE2_PCT_TP        = float(os.getenv("TRAIL_STAGE2_PCT_TP", "90.0"))  # Stage 3: Trail SL when price reaches >= 90% of TP
+TRAIL_STAGE2_LOCK_PCT      = float(os.getenv("TRAIL_STAGE2_LOCK_PCT", "75.0"))# Lock in 75% of target profit at Stage 3
+
+# Fallback / Fixed R settings
 BREAKEVEN_MFE_R            = float(os.getenv("BREAKEVEN_MFE_R", "0.8"))      # Stage 1: Move SL to BE (+1 pip buffer) at >= 0.8R
 TRAIL_STAGE1_MFE_R         = float(os.getenv("TRAIL_STAGE1_MFE_R", "1.3"))   # Stage 2: Trail SL to +0.5R profit at >= 1.3R
 TRAIL_STAGE1_LOCK_R        = float(os.getenv("TRAIL_STAGE1_LOCK_R", "0.5"))  # Locked R for Stage 2 (+0.5R)
