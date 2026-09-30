@@ -322,7 +322,7 @@ def handle_prenew_guards(ledger, ex) -> int:
         if risk <= 0:
             continue
         try:
-            cur = ex.current_price(symbol) if hasattr(ex, "current_price") else 0.0
+            cur = ex.current_price(symbol, direction=direction) if hasattr(ex, "current_price") else 0.0
         except Exception:
             cur = 0.0
         if not cur or cur <= 0:
@@ -370,7 +370,7 @@ def handle_prerollover_guards(ledger, ex):
             symbol = pos.get("symbol", "")
             direction = int(pos.get("direction", 1))
             entry_p = float(pos.get("fill_price", pos.get("entry_delivered", 0.0)))
-            cur_p = ex.current_price(symbol) if hasattr(ex, "current_price") else 0.0
+            cur_p = ex.current_price(symbol, direction=direction) if hasattr(ex, "current_price") else 0.0
             order_id = pos.get("order_id")
             if cur_p <= 0 or entry_p <= 0:
                 continue
@@ -425,7 +425,7 @@ def handle_prerollover_guards(ledger, ex):
             symbol = pos.get("symbol", "")
             direction = int(pos.get("direction", 1))
             order_id = pos.get("order_id")
-            cur_p = ex.current_price(symbol) if hasattr(ex, "current_price") else 0.0
+            cur_p = ex.current_price(symbol, direction=direction) if hasattr(ex, "current_price") else 0.0
             log.info("PRE_ROLLOVER_DERISK: Force-closing %s ref=%s (lots=%.2f) to protect margin",
                      symbol, ref_key, pos.get("lots", 0.01))
             if hasattr(ex, "close_position_by_ticket") and order_id and str(order_id).isdigit():
@@ -642,7 +642,7 @@ def manage_open_positions(ledger) -> int:
 
 
         try:
-            cur = ex.current_price(symbol) if hasattr(ex, "current_price") else 0.0
+            cur = ex.current_price(symbol, direction=direction) if hasattr(ex, "current_price") else 0.0
         except Exception:
             cur = 0.0
         if not cur:
@@ -1026,7 +1026,7 @@ def process_pending_retracements(ledger) -> int:
 
         # Get current price
         try:
-            cur = ex.current_price(symbol) if hasattr(ex, "current_price") else 0.0
+            cur = ex.current_price(symbol, direction=direction) if hasattr(ex, "current_price") else 0.0
         except Exception:
             cur = 0.0
 
@@ -1460,7 +1460,7 @@ def tick() -> bool:
                     continue
 
             # Fetch LIVE price first for pre-entry sanity and accurate dynamic sizing
-            cur = ex.current_price(symbol) if hasattr(ex, "current_price") else 0.0
+            cur = ex.current_price(symbol, direction=direction) if hasattr(ex, "current_price") else 0.0
             if not cur or cur <= 0:
                 cur = entry_price
 

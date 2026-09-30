@@ -117,12 +117,23 @@ class Mt5Broker:
             pass
 
     # -- prices -------------------------------------------------------------
-    def current_price(self, symbol: str) -> float:
+    def current_price(self, symbol: str, direction: int | None = None) -> float:
         mt5 = _import_mt5()
         mt5.symbol_select(symbol, True)
         tick = mt5.symbol_info_tick(symbol)
-        if tick is not None and getattr(tick, "ask", 0.0) > 0:
-            return float(tick.ask)
+        if tick is not None:
+            bid = float(getattr(tick, "bid", 0.0))
+            ask = float(getattr(tick, "ask", 0.0))
+            if direction == 1 and bid > 0:
+                return bid
+            elif direction == -1 and ask > 0:
+                return ask
+            elif bid > 0 and ask > 0:
+                return (bid + ask) / 2.0
+            elif ask > 0:
+                return ask
+            elif bid > 0:
+                return bid
         rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 1)
         if rates is not None and len(rates) > 0:
             return float(rates[0][4])
