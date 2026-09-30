@@ -21,6 +21,7 @@
   "AUDUSD:2026-09-28T23:00:00+00:00",
   "AUDUSD:2026-09-29T07:00:00+00:00",
   "AUDUSD:2026-09-29T16:00:00+00:00",
+  "AUDUSD:2026-09-30T03:00:00+00:00",
   "EURUSD:2026-09-14T02:00:00+00:00",
   "EURUSD:2026-09-14T03:00:00+00:00",
   "EURUSD:2026-09-14T04:00:00+00:00",
@@ -157,6 +158,20 @@
   "XAUUSD:2026-09-29T17:30:00+00:00"
  ],
  "history": [
+  {
+   "dir": "SHORT",
+   "entry": 0.69744,
+   "profile": "balanced",
+   "ref": 119,
+   "rr": 1.5,
+   "sl": 0.6985082563177732,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "AUDUSD",
+   "tf": "H1",
+   "tp": 0.69584,
+   "ts": "2026-09-30T03:00:00+00:00"
+  },
   {
    "dir": "LONG",
    "entry": 0.83444,
@@ -3209,6 +3224,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 118,
+ "ref_seq": 119,
  "zones": []
 }
