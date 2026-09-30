@@ -1114,16 +1114,17 @@ def tick() -> bool:
             pass
 
     if hasattr(config, "dynamic_portfolio_capacity"):
-        max_trades, max_trades_per_sym, max_portfolio_risk_pct, cap_tier = config.dynamic_portfolio_capacity(rm.balance, is_cent)
-    else:
-        if is_cent:
-            max_trades, max_trades_per_sym, max_portfolio_risk_pct = 8, 2, 30.0
-        elif rm.balance < 50.0:
-            max_trades, max_trades_per_sym, max_portfolio_risk_pct = 3, 1, 20.0
-        elif rm.balance < 500.0:
-            max_trades, max_trades_per_sym, max_portfolio_risk_pct = 4, 1, 25.0
+        cap_res = config.dynamic_portfolio_capacity(rm.balance, is_cent)
+        if len(cap_res) == 5:
+            max_trades, max_at_risk, max_trades_per_sym, max_portfolio_risk_pct, cap_tier = cap_res
         else:
-            max_trades, max_trades_per_sym, max_portfolio_risk_pct = 8, 2, 30.0
+            max_trades, max_trades_per_sym, max_portfolio_risk_pct, cap_tier = cap_res
+            max_at_risk = getattr(config, "MAX_AT_RISK_TRADES", 8)
+    else:
+        max_trades = getattr(config, "MAX_CONCURRENT_TRADES", 14 if is_cent else 8)
+        max_at_risk = getattr(config, "MAX_AT_RISK_TRADES", 8 if is_cent else 4)
+        max_trades_per_sym = getattr(config, "MAX_TRADES_PER_SYMBOL", 2)
+        max_portfolio_risk_pct = getattr(config, "MAX_PORTFOLIO_RISK_PCT", 35.0 if is_cent else 30.0)
 
     target_broker = getattr(ex, "broker", "mt5")
     open_positions = [
@@ -1131,6 +1132,12 @@ def tick() -> bool:
         if e.get("broker", "mt5") == target_broker
     ]
     active_open_count = len(open_positions)
+    # Positions with active downside risk (< BE). Trades at BE or in trailing profit have $0 risk!
+    at_risk_positions = [
+        e for e in open_positions
+        if e.get("sl_state") not in ("be", "trail_05", "trail_10")
+    ]
+    at_risk_count = len(at_risk_positions)
 
     # 1. Execute new setups (oldest first for correct sequence)
     for entry in reversed(history):
@@ -1140,10 +1147,16 @@ def tick() -> bool:
         symbol = entry.get("symbol", "")
         direction = _entry_dir(entry)
 
-        # Check 1: Max concurrent open trades across all pairs
+        # Check 1: Max total open trades across all pairs & indices (including runners)
         if active_open_count >= max_trades:
-            log.info("skip %s ref=%s — max concurrent trades reached (%d/%d active)",
+            log.info("skip %s ref=%s — max total concurrent trades reached (%d/%d active)",
                      symbol, ref_key, active_open_count, max_trades)
+            continue
+
+        # Check 1b: Max AT-RISK trades (trades at BE or with trailing profit are risk-free and do not block fresh entries!)
+        if at_risk_count >= max_at_risk:
+            log.info("skip %s ref=%s — max at-risk trades reached (%d/%d unhedged risk, %d risk-free runners)",
+                     symbol, ref_key, at_risk_count, max_at_risk, active_open_count - at_risk_count)
             continue
 
         # Check 2: Max concurrent trades on this specific symbol
@@ -1153,10 +1166,9 @@ def tick() -> bool:
                      symbol, ref_key, sym_open_count, max_trades_per_sym, symbol)
             continue
 
-        # Check 3: Cumulative portfolio unprotected risk (trades at Breakeven have $0 risk!)
+        # Check 3: Cumulative portfolio unprotected risk (trades at Breakeven or locked profit have $0 risk!)
         unprotected_risk_usd = sum(
-            float(e.get("risk_usd", 0.0)) for e in open_positions
-            if e.get("sl_state") != "be"
+            float(e.get("risk_usd", 0.0)) for e in at_risk_positions
         )
         current_unprotected_risk_pct = (unprotected_risk_usd / rm.balance * 100.0) if rm.balance > 0 else 0.0
         if current_unprotected_risk_pct + rm.risk_pct > max_portfolio_risk_pct:
