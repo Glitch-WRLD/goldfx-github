@@ -105,10 +105,12 @@ AGENT_STATE_URL = os.getenv(
 )
 
 # ---- Portfolio Exposure & Risk Budgeting ----
-MAX_CONCURRENT_TRADES = int(os.getenv("MAX_CONCURRENT_TRADES", "14"))         # max total open trades across all pairs & indices
-MAX_AT_RISK_TRADES    = int(os.getenv("MAX_AT_RISK_TRADES", "8"))             # max trades with capital actively at risk (< BE)
-MAX_TRADES_PER_SYMBOL = int(os.getenv("MAX_TRADES_PER_SYMBOL", "2"))         # max concurrent trades on single symbol
-MAX_PORTFOLIO_RISK_PCT = float(os.getenv("MAX_PORTFOLIO_RISK_PCT", "35.0"))  # max cumulative unprotected risk % (user approved 35%)
+MAX_CONCURRENT_TRADES   = int(os.getenv("MAX_CONCURRENT_TRADES", "14"))         # max total open trades across all pairs & indices
+MAX_AT_RISK_TRADES      = int(os.getenv("MAX_AT_RISK_TRADES", "8"))             # max trades with capital actively at risk (< BE)
+MAX_TRADES_PER_SYMBOL   = int(os.getenv("MAX_TRADES_PER_SYMBOL", "2"))         # max concurrent at-risk trades on single symbol (< BE)
+MAX_AT_RISK_PER_SYMBOL  = int(os.getenv("MAX_AT_RISK_PER_SYMBOL", "2"))        # max trades on single symbol with active downside risk (< BE)
+MAX_TOTAL_PER_SYMBOL    = int(os.getenv("MAX_TOTAL_PER_SYMBOL", "3"))          # max total trades on single symbol (Option 3: allows 3rd if prior are at BE)
+MAX_PORTFOLIO_RISK_PCT  = float(os.getenv("MAX_PORTFOLIO_RISK_PCT", "35.0"))  # max cumulative unprotected risk % (user approved 35%)
 LOCAL_TP_GUARD_ENABLED = os.getenv("LOCAL_TP_GUARD_ENABLED", "1") == "1"     # close immediately if chart price touches TP
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.5"))                 # max FX spread (pips) for market entry
 MAX_SPREAD_GOLD = float(os.getenv("MAX_SPREAD_GOLD", "1.50"))          # max XAUUSD spread ($) for market entry

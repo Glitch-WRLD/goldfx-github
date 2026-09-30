@@ -1299,11 +1299,28 @@ def tick() -> bool:
                      symbol, ref_key, at_risk_count, max_at_risk, active_open_count - at_risk_count)
             continue
 
-        # Check 2: Max concurrent trades on this specific symbol
-        sym_open_count = len([e for e in open_positions if e.get("symbol") == symbol])
-        if sym_open_count >= max_trades_per_sym:
-            log.info("skip %s ref=%s — symbol concentration limit reached (%d/%d on %s)",
-                     symbol, ref_key, sym_open_count, max_trades_per_sym, symbol)
+        # Check 2: Max concurrent trades on this specific symbol (Option 3: Risk-Free Trades Exempt from At-Risk Cap)
+        sym_all_positions = [e for e in open_positions if e.get("symbol") == symbol]
+        sym_at_risk_positions = [
+            e for e in sym_all_positions
+            if e.get("sl_state") not in ("be", "trail_05", "trail_10")
+        ]
+        sym_open_count = len(sym_all_positions)
+        sym_at_risk_count = len(sym_at_risk_positions)
+        sym_be_count = sym_open_count - sym_at_risk_count
+
+        # Check 2a: Hard ceiling on single symbol (including risk-free runners at BE)
+        max_sym_total = getattr(config, "MAX_TOTAL_PER_SYMBOL", 3 if (is_cent or max_trades_per_sym >= 2) else 2)
+        if sym_open_count >= max_sym_total:
+            log.info("skip %s ref=%s — symbol total concentration ceiling reached (%d/%d on %s, %d risk-free at BE)",
+                     symbol, ref_key, sym_open_count, max_sym_total, symbol, sym_be_count)
+            continue
+
+        # Check 2b: At-Risk ceiling on single symbol (< BE)
+        max_sym_at_risk = getattr(config, "MAX_AT_RISK_PER_SYMBOL", max_trades_per_sym)
+        if sym_at_risk_count >= max_sym_at_risk:
+            log.info("skip %s ref=%s — symbol at-risk limit reached (%d/%d at-risk on %s; existing %d trades must reach BE first)",
+                     symbol, ref_key, sym_at_risk_count, max_sym_at_risk, symbol, sym_at_risk_count)
             continue
 
         # Check 3: Cumulative portfolio unprotected risk (trades at Breakeven or locked profit have $0 risk!)
@@ -1641,7 +1658,9 @@ def tick() -> bool:
                  fill.fill_price, lots)
         fired_any = True
         active_open_count += 1
+        at_risk_count += 1
         open_positions.append(ledger.data[str(ref_key)])
+        at_risk_positions.append(ledger.data[str(ref_key)])
 
 
     # 2. Process pending retracements (Option 1: M5 Swing Sniper for Gold)

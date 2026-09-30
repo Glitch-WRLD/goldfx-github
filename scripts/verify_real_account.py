@@ -56,8 +56,11 @@ def run_verification():
     print(f"    • XAUUSD with $18.00 Stop:  {gold_lots:.2f} lots  -> Risk: {risk_standard:.1f} {curr_label} (${risk_standard/100:.2f} USD)")
     print(f"    • EURUSD with 20-pip Stop: {eur_lots:.2f} lots  -> Risk: {risk_standard:.1f} {curr_label} (${risk_standard/100:.2f} USD)")
 
-    # 5. Account Capacity (Tiered by Real USD Equity)
-    max_trades, max_sym, max_port_risk, tier_label = config.dynamic_portfolio_capacity(balance, is_cent)
+    res = config.dynamic_portfolio_capacity(balance, is_cent)
+    if len(res) == 5:
+        max_trades, max_at_risk, max_sym, max_port_risk, tier_label = res
+    else:
+        max_trades, max_sym, max_port_risk, tier_label = res
     print(f"\n[5] Portfolio Exposure Capacity (Dynamic by Real USD Size):")
     print(f"    Active Capacity Tier:      {tier_label}")
     print(f"    Max Concurrent Trades:     {max_trades} Trades (Max {max_sym} per pair)")
