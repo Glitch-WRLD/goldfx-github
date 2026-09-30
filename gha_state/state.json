@@ -40,6 +40,7 @@
   "EURUSD:2026-09-15T04:00:00+00:00",
   "EURUSD:2026-09-15T23:00:00+00:00",
   "EURUSD:2026-09-30T07:00:00+00:00",
+  "GBPAUD:2026-09-30T01:00:00+00:00",
   "GBPUSD:2026-09-14T23:00:00+00:00",
   "GBPUSD:2026-09-15T03:00:00+00:00",
   "GBPUSD:2026-09-15T08:00:00+00:00",
@@ -174,6 +175,20 @@
   "XAUUSD:2026-09-29T17:30:00+00:00"
  ],
  "history": [
+  {
+   "dir": "LONG",
+   "entry": 1.89866,
+   "profile": "balanced",
+   "ref": 136,
+   "rr": 1.4,
+   "sl": 1.8886425684394343,
+   "strategy_badge": "\ud83c\udfdb\ufe0f Institutional SMC Sweep",
+   "strategy_type": "smc_sweep",
+   "symbol": "GBPAUD",
+   "tf": "H1",
+   "tp": 1.912684404184792,
+   "ts": "2026-09-30T01:00:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 7660.9,
@@ -3548,6 +3563,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 135,
+ "ref_seq": 136,
  "zones": []
 }
