@@ -1327,11 +1327,20 @@ def tick() -> bool:
                 c_info = config.CONTRACTS.get(symbol, {})
                 digits = c_info.get("digits", 5)
                 pip_size = 0.0001 if digits in (4, 5) else (0.01 if digits in (2, 3) else c_info.get("point", 0.00001))
-                spread_pips = spread_val / pip_size if pip_size > 0 else 0.0
 
-                max_spread = config.MAX_SPREAD_GOLD if symbol == "XAUUSD" else config.MAX_SPREAD_PIPS
-                curr_metric = spread_val if symbol == "XAUUSD" else spread_pips
-                metric_unit = "$" if symbol == "XAUUSD" else "pips"
+                is_index = symbol in getattr(config, "INDEX_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"})
+                if symbol == "XAUUSD":
+                    curr_metric = spread_val
+                    max_spread = config.MAX_SPREAD_GOLD
+                    metric_unit = "$"
+                elif is_index:
+                    curr_metric = spread_val
+                    max_spread = getattr(config, "MAX_SPREAD_INDEX", 8.0)
+                    metric_unit = "pts"
+                else:
+                    curr_metric = spread_val / pip_size if pip_size > 0 else 0.0
+                    max_spread = config.MAX_SPREAD_PIPS
+                    metric_unit = "pips"
 
                 if curr_metric > max_spread:
                     log.info("skip %s ref=%s — spread too wide (%.2f %s > max %.2f %s). Awaiting normal liquidity.",

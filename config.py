@@ -112,6 +112,7 @@ MAX_PORTFOLIO_RISK_PCT = float(os.getenv("MAX_PORTFOLIO_RISK_PCT", "35.0"))  # m
 LOCAL_TP_GUARD_ENABLED = os.getenv("LOCAL_TP_GUARD_ENABLED", "1") == "1"     # close immediately if chart price touches TP
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.5"))                 # max FX spread (pips) for market entry
 MAX_SPREAD_GOLD = float(os.getenv("MAX_SPREAD_GOLD", "1.50"))          # max XAUUSD spread ($) for market entry
+MAX_SPREAD_INDEX = float(os.getenv("MAX_SPREAD_INDEX", "8.0"))          # max Index spread (pts) for market entry (NAS100 ~3.2, US500 ~2.1, DJ30 ~5.0)
 ROLLOVER_MIN_MARGIN_LEVEL_PCT = float(os.getenv("ROLLOVER_MIN_MARGIN_LEVEL_PCT", "250.0"))  # stress test margin %
 
 # ---- Account-Size Tiered Trade Capacity ----
