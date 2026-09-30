@@ -39,6 +39,7 @@ SYMBOL_CURRENCIES: dict[str, set[str]] = {
     "NASDAQ-100": {"USD"},
     "US500": {"USD"},
     "DJ30": {"USD"},
+    "GBPAUD": {"GBP", "AUD"},
 }
 
 

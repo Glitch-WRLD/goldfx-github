@@ -115,7 +115,7 @@ def is_dxy_aligned(symbol: str, direction: int, dxy_trend: int, exempt_symbols: 
         return True, "FILTER_DISABLED"
 
     exempt = exempt_symbols if exempt_symbols is not None else getattr(
-        config, "DXY_EXEMPT_SYMBOLS", {"XAUUSD", "NASDAQ-100", "US500", "DJ30"}
+        config, "DXY_EXEMPT_SYMBOLS", {"XAUUSD", "NASDAQ-100", "US500", "DJ30", "GBPAUD"}
     )
     if symbol in exempt:
         return True, "EXEMPT"
@@ -282,7 +282,7 @@ class FVGScanner:
         # Excludes Gold and Indices to allow safe-haven and independent equity trends.
         dxy_trend_label = ""
         if getattr(config, "DXY_FILTER_ENABLED", True):
-            exempt = getattr(config, "DXY_EXEMPT_SYMBOLS", {"XAUUSD", "NASDAQ-100", "US500", "DJ30"})
+            exempt = getattr(config, "DXY_EXEMPT_SYMBOLS", {"XAUUSD", "NASDAQ-100", "US500", "DJ30", "GBPAUD"})
             if symbol not in exempt:
                 tf_dxy = getattr(config, "DXY_FILTER_TF", "M15")
                 ema_dxy = getattr(config, "DXY_FILTER_EMA", 21)

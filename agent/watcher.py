@@ -757,8 +757,12 @@ def manage_open_positions(ledger) -> int:
 
         # 2. Progressive Trade Protection & Step-Trailing Stop (Percentage-of-TP Engine)
         trail_mode = getattr(config, "TRAIL_MODE", "PERCENTAGE")
-        be_pct = float(getattr(config, "BREAKEVEN_PCT_TP", 50.0))
-        t1_pct = float(getattr(config, "TRAIL_STAGE1_PCT_TP", 75.0))
+        if symbol == "GBPAUD":
+            be_pct = float(getattr(config, "BREAKEVEN_PCT_TP_GBPAUD", 70.0))
+            t1_pct = float(getattr(config, "TRAIL_STAGE1_PCT_TP_GBPAUD", 85.0))
+        else:
+            be_pct = float(getattr(config, "BREAKEVEN_PCT_TP", 50.0))
+            t1_pct = float(getattr(config, "TRAIL_STAGE1_PCT_TP", 75.0))
         t1_lock_pct = float(getattr(config, "TRAIL_STAGE1_LOCK_PCT", 50.0)) / 100.0
         t2_pct = float(getattr(config, "TRAIL_STAGE2_PCT_TP", 90.0))
         t2_lock_pct = float(getattr(config, "TRAIL_STAGE2_LOCK_PCT", 75.0)) / 100.0
@@ -1412,7 +1416,7 @@ def tick() -> bool:
         # Double-checks live US Dollar momentum before firing into MT5 broker.
         # Exempts Gold and Equity Indices to preserve independent safe-haven / momentum runs.
         if getattr(config, "DXY_FILTER_ENABLED", True):
-            exempt = getattr(config, "DXY_EXEMPT_SYMBOLS", {"XAUUSD", "NASDAQ-100", "US500", "DJ30"})
+            exempt = getattr(config, "DXY_EXEMPT_SYMBOLS", {"XAUUSD", "NASDAQ-100", "US500", "DJ30", "GBPAUD"})
             if symbol not in exempt:
                 from engine.scanner import get_dxy_trend, is_dxy_aligned
                 tf_dxy = getattr(config, "DXY_FILTER_TF", "M15")

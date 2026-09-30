@@ -51,6 +51,7 @@ SYMBOL_RUNTIME = {
     "USDCHF": {"entry_tf": "H1", "bias_htf": "H4", "strategy": "fvg_retest"},
     # Liquidity Trap & Precision Sniper Engine (SMC Inducement Sweep)
     "EURUSD": {"entry_tf": "H1", "bias_htf": "H4", "strategy": "smc_sweep"},
+    "GBPAUD": {"entry_tf": "H1", "bias_htf": "H4", "strategy": "smc_sweep"},
     # Global Equity Indices Arsenal (Route 2: Multi-Index Basket)
     "NASDAQ-100": {"entry_tf": "M15", "bias_htf": "H1", "strategy": "fvg_retest"},
     "US500": {"entry_tf": "M30", "bias_htf": "H1", "strategy": "fvg_retest"},

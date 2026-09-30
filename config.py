@@ -19,6 +19,7 @@ SYMBOLS = {
     "NASDAQ-100": "PEPPERSTONE:NAS100",
     "US500": "CAPITALCOM:US500",
     "DJ30": "CAPITALCOM:US30",
+    "GBPAUD": "OANDA:GBPAUD",
     "DXY": "TVC:DXY",
 }
 # map brand names -> tradingview-sdk Interval
@@ -82,6 +83,7 @@ CONTRACTS = {
     "NASDAQ-100": {"point": 0.01, "pip_value_per_lot_usd": 0.10, "digits": 2},
     "US500": {"point": 0.01, "pip_value_per_lot_usd": 0.10, "digits": 2},
     "DJ30": {"point": 0.01, "pip_value_per_lot_usd": 0.10, "digits": 2},
+    "GBPAUD": {"point": 0.00001, "pip_value_per_lot_usd": 6.94 / 10, "digits": 5},
     "DXY": {"point": 0.001, "pip_value_per_lot_usd": 1.0, "digits": 3},
 }
 
@@ -143,7 +145,9 @@ GOLD_REVERSAL_TF           = os.getenv("GOLD_REVERSAL_TF", "M15")
 # ---- Trade Protection & Progressive Trailing (Percentage-of-TP Engine) ----
 TRAIL_MODE                 = os.getenv("TRAIL_MODE", "PERCENTAGE")            # "PERCENTAGE" (proportional to TP) or "FIXED_R"
 BREAKEVEN_PCT_TP           = float(os.getenv("BREAKEVEN_PCT_TP", "50.0"))     # Stage 1: Move SL to BE (+1 pip) when price reaches >= 50% of TP
+BREAKEVEN_PCT_TP_GBPAUD    = float(os.getenv("BREAKEVEN_PCT_TP_GBPAUD", "70.0")) # Stage 1 GBPAUD: Wider BE buffer (70% TP) for deep SMC inducement retests
 TRAIL_STAGE1_PCT_TP        = float(os.getenv("TRAIL_STAGE1_PCT_TP", "75.0"))  # Stage 2: Trail SL when price reaches >= 75% of TP
+TRAIL_STAGE1_PCT_TP_GBPAUD = float(os.getenv("TRAIL_STAGE1_PCT_TP_GBPAUD", "85.0")) # Stage 2 GBPAUD: Trail SL when price reaches >= 85% of TP
 TRAIL_STAGE1_LOCK_PCT      = float(os.getenv("TRAIL_STAGE1_LOCK_PCT", "50.0"))# Lock in 50% of target profit at Stage 2
 TRAIL_STAGE2_PCT_TP        = float(os.getenv("TRAIL_STAGE2_PCT_TP", "90.0"))  # Stage 3: Trail SL when price reaches >= 90% of TP
 TRAIL_STAGE2_LOCK_PCT      = float(os.getenv("TRAIL_STAGE2_LOCK_PCT", "75.0"))# Lock in 75% of target profit at Stage 3
@@ -159,7 +163,7 @@ TRAIL_STAGE2_LOCK_R        = float(os.getenv("TRAIL_STAGE2_LOCK_R", "1.0"))  # L
 DXY_FILTER_ENABLED         = os.getenv("DXY_FILTER_ENABLED", "1") == "1"     # 1 = Filter pure Forex by US Dollar index momentum
 DXY_FILTER_TF              = os.getenv("DXY_FILTER_TF", "M15")               # M15 momentum baseline (+60.3% win rate in empirical audit)
 DXY_FILTER_EMA             = int(os.getenv("DXY_FILTER_EMA", "21"))          # EMA 21 trend filter
-DXY_EXEMPT_SYMBOLS         = {"XAUUSD", "NASDAQ-100", "US500", "DJ30"}       # Decoupled / Independent assets exempt from DXY filter
+DXY_EXEMPT_SYMBOLS         = {"XAUUSD", "NASDAQ-100", "US500", "DJ30", "GBPAUD"} # Decoupled / Non-USD cross assets exempt from DXY filter
 
 # ---- High-Impact Red-Folder News Blackout & Playbook ----
 NEWS_BLACKOUT_ENABLED       = os.getenv("NEWS_BLACKOUT_ENABLED", "1") == "1"     # 1 = Pause new entries during Tier-1 news
