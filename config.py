@@ -127,3 +127,6 @@ def dynamic_portfolio_capacity(balance: float, is_cent: bool = False) -> tuple[i
 GOLD_REVERSAL_EXIT_ENABLED = os.getenv("GOLD_REVERSAL_EXIT_ENABLED", "1") == "1"
 GOLD_REVERSAL_MIN_MFE_R    = float(os.getenv("GOLD_REVERSAL_MIN_MFE_R", "0.5"))
 GOLD_REVERSAL_TF           = os.getenv("GOLD_REVERSAL_TF", "M15")
+
+# ---- Trade Protection (Breakeven) ----
+BREAKEVEN_MFE_R            = float(os.getenv("BREAKEVEN_MFE_R", "0.8"))  # Move SL to BE (+1 pip buffer) at >= 0.8R

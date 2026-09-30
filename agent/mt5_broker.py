@@ -17,10 +17,13 @@ actually placed through the MT5 broker.
 from __future__ import annotations
 
 import datetime as dt
+import logging
 import sys
 
 import config
 from agent.oanda import Fill
+
+log = logging.getLogger("agent.mt5_broker")
 
 # MT5 trade return codes we accept as a fill.
 _DONE_CODES = {10009, 10010, 10011, 10012, 10013}  # done / done partial / no changes
@@ -366,6 +369,36 @@ class Mt5Broker:
             "free_margin": float(d.get("margin_free", 0.0)),
             "margin_level": float(d.get("margin_level", 0.0)),
         }
+
+    def get_point(self, symbol: str) -> float:
+        """Return the point size for a symbol (e.g. 0.00001 for EURUSD, 0.01 for XAUUSD)."""
+        mt5 = _import_mt5()
+        info = mt5.symbol_info(symbol)
+        if info is not None and getattr(info, "point", 0.0) > 0:
+            return float(info.point)
+        return 0.01 if symbol == "XAUUSD" or "JPY" in symbol else 0.00001
+
+    def get_closed_deal(self, ticket: int | str) -> dict | None:
+        """Return exit deal details for a closed position if available in MT5 deal history."""
+        mt5 = _import_mt5()
+        try:
+            deals = mt5.history_deals_get(position=int(ticket))
+            if not deals:
+                return None
+            for d in reversed(deals):
+                if d.entry in (1, 3) or d.profit != 0:
+                    return {
+                        "ticket": d.ticket,
+                        "position_id": d.position_id,
+                        "price": float(d.price),
+                        "profit": float(d.profit),
+                        "time": d.time,
+                        "comment": getattr(d, "comment", ""),
+                        "reason": getattr(d, "reason", 0),
+                    }
+        except Exception as e:
+            log.debug("get_closed_deal error for ticket %s: %s", ticket, e)
+        return None
 
 
 

@@ -458,10 +458,65 @@ def manage_open_positions(ledger) -> int:
         order_id = pos.get("order_id")
         if active_broker_tickets is not None and order_id and str(order_id).isdigit():
             if str(order_id) not in active_broker_tickets:
-                log.info("RECONCILE: ref=%s ticket=%s already closed in MT5. Marking closed.", ref, order_id)
-                ledger.record_outcome(ref, status="closed", hit="broker_exit", exit_price=pos.get("fill_price", 0.0), pnl_usd=0.0, classification="broker_closed")
-                actions += 1
-                continue
+                deal = ex.get_closed_deal(order_id) if hasattr(ex, "get_closed_deal") else None
+                if deal is not None:
+                    # Verified closed by broker history!
+                    exit_price = deal.get("price", pos.get("fill_price", 0.0))
+                    pnl_raw = deal.get("profit", 0.0)
+                    comment = deal.get("comment", "").lower()
+                    reason = deal.get("reason", 0)
+                    sl_state = pos.get("sl_state", "initial")
+                    peak_mfe = float(pos.get("peak_mfe_r", 0.0))
+
+                    if reason == 5 or "[tp" in comment or pnl_raw > 0.5:
+                        hit = "tp"
+                        classification = "broker_tp"
+                    elif sl_state == "be" or "[be" in comment or abs(pnl_raw) < 1.0:
+                        hit = "be"
+                        classification = "be_avoided_sl"
+                    else:
+                        hit = "sl"
+                        if peak_mfe >= 0.5:
+                            classification = "giveback_sl"
+                        elif peak_mfe < 0.15:
+                            classification = "bad_entry"
+                        else:
+                            classification = "breach"
+
+                    log.info("RECONCILE_VERIFIED: ref=%s ticket=%s closed in MT5. hit=%s pnl=%.2f exit=%.5f class=%s",
+                             ref, order_id, hit, pnl_raw, exit_price, classification)
+                    ledger.record_outcome(ref, status="closed", hit=hit, exit_price=exit_price,
+                                          pnl_usd=pnl_raw, classification=classification)
+                    actions += 1
+
+                    msg = (
+                        f"{'🎯' if hit == 'tp' else ('⚪' if hit == 'be' else '🛑')} {pos.get('symbol')} — {hit.upper()} (BROKER CLOSED)"
+                        f"\n{'─' * 26}"
+                        f"\nSetup #{ref} · Exit price {exit_price:.5f}"
+                        f"\nRealized P&L: {pnl_raw:+.2f} ({classification})"
+                        f"\nPeak MFE reached: +{peak_mfe:.2f}R"
+                        f"\nBroker: {pos.get('broker', 'mt5')}"
+                        f"\n{'─' * 26}"
+                    )
+                    if CHAT_ID:
+                        send(CHAT_ID, msg)
+                    continue
+                else:
+                    # Ticket not in active tickets, but no exit deal found yet. Avoid false-closing.
+                    miss_count = pos.get("_unconfirmed_missing", 0) + 1
+                    pos["_unconfirmed_missing"] = miss_count
+                    if miss_count < 10:
+                        log.debug("RECONCILE_WAIT: ref=%s ticket=%s not in open positions, but no deal in history yet (%d/10)",
+                                  ref, order_id, miss_count)
+                        continue
+                    else:
+                        log.warning("RECONCILE_TIMEOUT: ref=%s ticket=%s missing for 10 checks with no deal. Marking broker_closed.",
+                                    ref, order_id)
+                        ledger.record_outcome(ref, status="closed", hit="broker_exit",
+                                              exit_price=pos.get("fill_price", 0.0), pnl_usd=0.0,
+                                              classification="broker_closed")
+                        actions += 1
+                        continue
 
         symbol = pos.get("symbol")
         direction = int(pos.get("direction", 1))
@@ -482,8 +537,11 @@ def manage_open_positions(ledger) -> int:
 
         # Current MFE in R
         mfe_r = (cur - fill_price) / risk if direction == 1 else (fill_price - cur) / risk
-        peak_mfe = max(float(pos.get("peak_mfe_r", 0.0)), mfe_r)
-        pos["peak_mfe_r"] = round(peak_mfe, 2)
+        prev_peak = float(pos.get("peak_mfe_r", 0.0))
+        peak_mfe = max(prev_peak, mfe_r)
+        if round(peak_mfe, 2) > prev_peak:
+            pos["peak_mfe_r"] = round(peak_mfe, 2)
+            ledger.save()
 
         # 0. Local TP Guard (Spread-Proof Take Profit Execution)
         # If market price reached or passed TP, close immediately to prevent missing TP due to Ask/Bid spread hover
@@ -576,54 +634,70 @@ def manage_open_positions(ledger) -> int:
                             continue
 
         # 2. Breakeven protection: activate at >= 0.8R (Forex & Gold standard)
-        if mfe_r >= 0.8 and sl_state != "be":
+        be_threshold = float(getattr(config, "BREAKEVEN_MFE_R", 0.8))
+        if mfe_r >= be_threshold and sl_state != "be":
             pos["sl_state"] = "be"
-            pos["sl_protected"] = fill_price
+            # Calculate BE stop with +1 pip buffer (10 points) in profit direction to cover commissions & spread
+            point = ex.get_point(symbol) if hasattr(ex, "get_point") else (0.01 if symbol == "XAUUSD" or "JPY" in symbol else 0.00001)
+            pip_buffer = 10 * point
+            digits = 5 if point < 0.01 else 2
+            if direction == 1:
+                be_sl = round(fill_price + pip_buffer, digits)
+            else:
+                be_sl = round(fill_price - pip_buffer, digits)
+            pos["sl_protected"] = be_sl
+
             if hasattr(ex, "modify_position"):
                 try:
-                    ex.modify_position(symbol, pos.get("order_id"), sl=fill_price, tp=tp)
+                    ex.modify_position(symbol, pos.get("order_id"), sl=be_sl, tp=tp)
                 except Exception as me:
                     log.warning("modify_position ref=%s error: %s", ref, me)
             ledger.save()
             actions += 1
             msg = (
-                f"\U0001F6E1\uFE0F {symbol} \u2014 SL MOVED TO BREAKEVEN"
+                f"\U0001F6E1\uFE0F {symbol} \u2014 SL MOVED TO BREAKEVEN (+1 PIP BUFFER)"
                 f"\n{'\u2500' * 26}"
                 f"\nSetup #{ref} \u00b7 Peak profit +{mfe_r:.2f}R"
-                f"\nStop-loss adjusted to entry {fill_price:.5f} (Risk-Free)"
+                f"\nStop-loss adjusted to {be_sl:.5f} (Entry: {fill_price:.5f})"
+                f"\nRisk-Free: spread & broker costs protected!"
                 f"\nBroker: {pos.get('broker', 'mt5')}"
                 f"\n{'\u2500' * 26}"
                 f"\n\u26A0\ufe0f Auto-managed by GoldFX agent."
             )
             if CHAT_ID:
                 send(CHAT_ID, msg)
-            log.info("PROTECTED ref=%s %s SL->BE @ %.5f (peak +%.2fR)",
-                     ref, symbol, fill_price, mfe_r)
+            log.info("PROTECTED ref=%s %s SL->BE @ %.5f (+1 pip buffer, peak +%.2fR)",
+                     ref, symbol, be_sl, mfe_r)
 
-        # 3. Breakeven exit: if price retraces back to entry after BE activation
+        # 3. Breakeven exit: if price retraces back to entry/buffer after BE activation
         elif sl_state == "be":
-            hit_be = (direction == 1 and cur <= fill_price) or (direction == -1 and cur >= fill_price)
+            be_sl = float(pos.get("sl_protected", fill_price))
+            hit_be = (direction == 1 and cur <= be_sl) or (direction == -1 and cur >= be_sl)
             if hit_be:
+                order_id = pos.get("order_id")
                 try:
-                    ex.close_position(symbol, direction, float(pos.get("lots", 0.01)))
+                    if hasattr(ex, "close_position_by_ticket") and order_id and str(order_id).isdigit():
+                        ex.close_position_by_ticket(int(order_id))
+                    else:
+                        ex.close_position(symbol, direction, float(pos.get("lots", 0.01)))
                 except Exception as ce:
                     log.error("BE close error ref=%s: %s", ref, ce)
                 ledger.record_outcome(ref, status="closed", hit="be",
-                                      exit_price=fill_price, pnl_usd=0.0,
+                                      exit_price=be_sl, pnl_usd=0.0,
                                       classification="be_avoided_sl")
                 actions += 1
                 msg = (
                     f"\u26AA {symbol} \u2014 EXITED AT BREAKEVEN"
                     f"\n{'\u2500' * 26}"
-                    f"\nSetup #{ref} \u00b7 Exited at entry {fill_price:.5f}"
-                    f"\nP&L: 0.00 USD (0.00R) \u00b7 Avoided full -1R Stop Loss!"
+                    f"\nSetup #{ref} \u00b7 Exited at {be_sl:.5f}"
+                    f"\nP&L: ~0.00 USD (0.00R) \u00b7 Avoided full -1R Stop Loss!"
                     f"\nBroker: {pos.get('broker', 'mt5')}"
                     f"\n{'\u2500' * 26}"
                     f"\n\u26A0\ufe0f Auto-managed by GoldFX agent."
                 )
                 if CHAT_ID:
                     send(CHAT_ID, msg)
-                log.info("EXITED_BE ref=%s %s @ %.5f (Avoided SL)", ref, symbol, fill_price)
+                log.info("EXITED_BE ref=%s %s @ %.5f (Avoided SL)", ref, symbol, be_sl)
 
     return actions
 
