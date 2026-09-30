@@ -119,9 +119,15 @@ def get_df(symbol: str, tf: str, refresh: bool = False) -> pd.DataFrame:
     cached = None if refresh else load_cached(symbol, tf)
     if cached is not None:
         return cached
-    df = _run_async(fetch_bars(symbol, tf))
-    save_cached(symbol, tf, df)
-    return df
+    try:
+        df = _run_async(fetch_bars(symbol, tf))
+        save_cached(symbol, tf, df)
+        return df
+    except Exception:
+        cached = load_cached(symbol, tf)
+        if cached is not None and not cached.empty:
+            return cached
+        raise
 
 
 if __name__ == "__main__":
