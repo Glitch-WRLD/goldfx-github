@@ -149,3 +149,17 @@ DXY_FILTER_ENABLED         = os.getenv("DXY_FILTER_ENABLED", "1") == "1"     # 1
 DXY_FILTER_TF              = os.getenv("DXY_FILTER_TF", "M15")               # M15 momentum baseline (+60.3% win rate in empirical audit)
 DXY_FILTER_EMA             = int(os.getenv("DXY_FILTER_EMA", "21"))          # EMA 21 trend filter
 DXY_EXEMPT_SYMBOLS         = {"XAUUSD", "NASDAQ-100", "US500", "DJ30"}       # Decoupled / Independent assets exempt from DXY filter
+
+# ---- High-Impact Red-Folder News Blackout & Playbook ----
+NEWS_BLACKOUT_ENABLED       = os.getenv("NEWS_BLACKOUT_ENABLED", "1") == "1"     # 1 = Pause new entries during Tier-1 news
+NEWS_BUFFER_BEFORE_MIN      = int(os.getenv("NEWS_BUFFER_BEFORE_MIN", "15"))     # Mins before event to pause fills
+NEWS_BUFFER_AFTER_MIN       = int(os.getenv("NEWS_BUFFER_AFTER_MIN", "15"))      # Mins after event to resume fills
+NEWS_PLAYBOOK_ENABLED       = os.getenv("NEWS_PLAYBOOK_ENABLED", "1") == "1"     # 1 = Send 30-min tactical playbook to Telegram
+NEWS_PLAYBOOK_AHEAD_MIN     = int(os.getenv("NEWS_PLAYBOOK_AHEAD_MIN", "30"))    # Mins ahead to send briefing
+NEWS_PROTECT_PROFITS        = os.getenv("NEWS_PROTECT_PROFITS", "1") == "1"      # 1 = Move SL to BE (+1 pip) on profitable trades before news
+
+# ---- US Open Index Opening Bell Slippage Buffer (13:25 - 13:45 UTC) ----
+US_OPEN_BUFFER_ENABLED      = os.getenv("US_OPEN_BUFFER_ENABLED", "1") == "1"    # 1 = Pause new index fills at NYSE open
+US_OPEN_START_UTC           = os.getenv("US_OPEN_START_UTC", "13:25")            # 5 mins before 13:30 opening bell
+US_OPEN_END_UTC             = os.getenv("US_OPEN_END_UTC", "13:45")              # 15 mins after opening bell (first M15 candle closes)
+INDEX_SYMBOLS               = {"NASDAQ-100", "US500", "DJ30"}                    # Assets subject to US Open cooldown

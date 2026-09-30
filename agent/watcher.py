@@ -283,6 +283,77 @@ def _is_prerollover_window() -> bool:
         return False
 
 
+def _is_us_open_cooldown(symbol: str) -> bool:
+    """True if symbol is an equity index and current time is in the 13:25 - 13:45 UTC opening bell window."""
+    if not getattr(config, "US_OPEN_BUFFER_ENABLED", True):
+        return False
+    if symbol not in getattr(config, "INDEX_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"}):
+        return False
+    now_utc = dt.datetime.now(dt.timezone.utc).time()
+    try:
+        sh, sm = [int(x) for x in getattr(config, "US_OPEN_START_UTC", "13:25").split(":")]
+        eh, em = [int(x) for x in getattr(config, "US_OPEN_END_UTC", "13:45").split(":")]
+        return dt.time(sh, sm) <= now_utc <= dt.time(eh, em)
+    except Exception:
+        return False
+
+
+def handle_prenew_guards(ledger, ex) -> int:
+    """Pre-News Defense: 15 mins before high-impact news, move SL on profitable open trades to BE (+1 pip)."""
+    if not getattr(config, "NEWS_PROTECT_PROFITS", True):
+        return 0
+    from engine.news import get_active_news_blackout
+    actions = 0
+    for ref, pos in list(ledger.open_entries().items()):
+        symbol = pos.get("symbol")
+        sl_state = pos.get("sl_state", "initial")
+        if sl_state in ("be", "trail_05", "trail_10"):
+            continue  # already protected!
+
+        is_bo, reason, ev = get_active_news_blackout(symbol, buffer_before_min=15, buffer_after_min=0)
+        if not is_bo:
+            continue
+
+        fill_price = float(pos.get("fill_price", 0.0))
+        sl = float(pos.get("sl", 0.0))
+        direction = int(pos.get("direction", 1))
+        risk = abs(fill_price - sl)
+        if risk <= 0:
+            continue
+        try:
+            cur = ex.current_price(symbol) if hasattr(ex, "current_price") else 0.0
+        except Exception:
+            cur = 0.0
+        if not cur or cur <= 0:
+            continue
+        mfe_r = (cur - fill_price) / risk if direction == 1 else (fill_price - cur) / risk
+        # If trade is in profit (>= +0.3R), lock to Breakeven (+1 pip) before the news release!
+        if mfe_r >= 0.3:
+            c_info = config.CONTRACTS.get(symbol, {})
+            point = float(c_info.get("point", 0.00001))
+            pip_buffer = point * 10 if c_info.get("digits", 5) in (4, 5) else point
+            new_sl = fill_price + pip_buffer if direction == 1 else fill_price - pip_buffer
+            order_id = pos.get("order_id")
+            if hasattr(ex, "modify_sl_tp") and order_id and str(order_id).isdigit():
+                mod_res = ex.modify_sl_tp(int(order_id), new_sl, float(pos.get("tp", 0.0)))
+                if mod_res and getattr(mod_res, "ok", False):
+                    pos["sl"] = new_sl
+                    pos["sl_state"] = "be"
+                    ledger.save()
+                    actions += 1
+                    log.info("PRE_NEWS_BE ref=%s %s moved to BE (+1 pip) ahead of %s", ref, symbol, reason)
+                    msg = (
+                        f"🛡️ {symbol} — PRE-NEWS BREAK-EVEN SHIELD\n"
+                        f"{'─' * 26}\n"
+                        f"Setup #{ref} · SL moved to BE ({new_sl:.5f})\n"
+                        f"Profit secured before High-Impact News: {reason}\n"
+                        f"Capital protected against volatility shockwave."
+                    )
+                    if CHAT_ID:
+                        send(CHAT_ID, msg)
+    return actions
+
+
 def handle_prerollover_guards(ledger, ex):
     """Execute Defense 2 (Margin Stress-Test) and Defense 3 (Pre-Rollover Profit Lock)."""
     if not _is_prerollover_window():
@@ -1100,6 +1171,19 @@ def tick() -> bool:
     except Exception as e:
         log.warning("handle_prerollover_guards error: %s", e)
 
+    # High-Impact Red-Folder News Tactical Playbook Dispatcher (~30 mins before release)
+    try:
+        from engine.news import check_and_send_pre_news_alerts
+        check_and_send_pre_news_alerts(send, CHAT_ID, lookahead_min=getattr(config, "NEWS_PLAYBOOK_AHEAD_MIN", 30))
+    except Exception as e:
+        log.warning("check_and_send_pre_news_alerts error: %s", e)
+
+    # Pre-News Defense: Lock profits to Break-Even ahead of red-folder releases
+    try:
+        handle_prenew_guards(ledger, ex)
+    except Exception as e:
+        log.warning("handle_prenew_guards error: %s", e)
+
     fired_any = False
 
     # Defense 1: Portfolio Risk Budgeting & Capacity Guard (Dynamic by Real USD Account Size)
@@ -1201,6 +1285,20 @@ def tick() -> bool:
             log.info("skip %s ref=%s — rollover blackout active (%s - %s UTC). New entries paused.",
                      symbol, ref_key, getattr(config, "ROLLOVER_START_UTC", "20:55"), getattr(config, "ROLLOVER_END_UTC", "22:15"))
             continue
+
+        # US Open Opening Bell Cooldown Check (13:25 - 13:45 UTC for NASDAQ-100, US500, DJ30)
+        if _is_us_open_cooldown(symbol):
+            log.info("skip %s ref=%s — US Open opening bell volatility cooldown active (13:25 - 13:45 UTC). New entries paused.",
+                     symbol, ref_key)
+            continue
+
+        # High-Impact Red-Folder News Blackout (e.g. -15m to +15m around NFP, CPI, FOMC, etc.)
+        if getattr(config, "NEWS_BLACKOUT_ENABLED", True):
+            from engine.news import get_active_news_blackout
+            is_news_bo, bo_reason, _ = get_active_news_blackout(symbol)
+            if is_news_bo:
+                log.info("skip %s ref=%s — %s", symbol, ref_key, bo_reason)
+                continue
 
         # DXY Macro Momentum Defense (Forex Pairs Only):
         # Double-checks live US Dollar momentum before firing into MT5 broker.

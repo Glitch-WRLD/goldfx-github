@@ -294,6 +294,24 @@ class FVGScanner:
                     return None
                 dxy_trend_label = dxy_lbl
 
+        # High-Impact Red-Folder News Blackout Check
+        if getattr(config, "NEWS_BLACKOUT_ENABLED", True):
+            from engine.news import get_active_news_blackout
+            is_news_bo, bo_reason, _ = get_active_news_blackout(symbol, as_of_utc=sig.ts)
+            if is_news_bo:
+                log.info("NEWS_BLACKOUT_SKIP: %s setup at %s dropped (%s).", symbol, sig.ts, bo_reason)
+                return None
+
+        # US Open Opening Bell Cooldown Check (13:25 - 13:45 UTC for NASDAQ-100, US500, DJ30)
+        if getattr(config, "US_OPEN_BUFFER_ENABLED", True) and symbol in getattr(config, "INDEX_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"}):
+            try:
+                ts_time = sig.ts.tz_convert("UTC").time() if hasattr(sig.ts, "tz_convert") else sig.ts.time()
+                if dt.time(13, 25) <= ts_time <= dt.time(13, 45):
+                    log.info("US_OPEN_COOLDOWN_SKIP: %s setup at %s dropped during 13:25-13:45 UTC opening bell window.", symbol, sig.ts)
+                    return None
+            except Exception:
+                pass
+
         rd = self.risk.evaluate(symbol, side, entry, sl, tp, now_utc_day=None,
                                 realized_wr=None)
         if not rd.ok:
