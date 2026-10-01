@@ -182,50 +182,98 @@ def get_active_news_blackout(
     return False, "NO_BLACKOUT", None
 
 
-def format_news_playbook(e: dict) -> str:
-    """Generate a clean, structured tactical pre-news playbook for Telegram."""
-    country = str(e.get("country", "")).upper()
-    title = e.get("title", "Tier-1 High-Impact Event")
-    ev_dt = parse_event_time(e)
+def get_directional_actions(country: str) -> tuple[str, str]:
+    """Return (strong_currency_action, weak_currency_action) for our traded portfolio."""
+    if country == "USD":
+        strong = "SELL EURUSD, GBPUSD, AUDUSD, NZDUSD, Gold | BUY USDCAD, USDCHF, USDJPY"
+        weak = "BUY EURUSD, GBPUSD, AUDUSD, NZDUSD, Gold | SELL USDCAD, USDCHF, USDJPY"
+    elif country == "EUR":
+        strong = "BUY EURUSD"
+        weak = "SELL EURUSD"
+    elif country == "GBP":
+        strong = "BUY GBPUSD, GBPAUD"
+        weak = "SELL GBPUSD, GBPAUD"
+    elif country == "CAD":
+        strong = "SELL USDCAD"
+        weak = "BUY USDCAD"
+    elif country == "AUD":
+        strong = "BUY AUDUSD | SELL GBPAUD"
+        weak = "SELL AUDUSD | BUY GBPAUD"
+    elif country == "NZD":
+        strong = "BUY NZDUSD"
+        weak = "SELL NZDUSD"
+    elif country == "CHF":
+        strong = "SELL USDCHF"
+        weak = "BUY USDCHF"
+    elif country == "JPY":
+        strong = "SELL USDJPY"
+        weak = "BUY USDJPY"
+    else:
+        strong = f"BUY {country} pairs against USD"
+        weak = f"SELL {country} pairs against USD"
+    return strong, weak
+
+
+def format_consolidated_playbook(ev_list: list[dict]) -> str:
+    """Generate a clean, structured tactical pre-news playbook for Telegram with directional BUY/SELL instructions."""
+    first = ev_list[0]
+    country = str(first.get("country", "")).upper()
+    titles = [str(e.get("title", "High-Impact Event")) for e in ev_list]
+    ev_dt = parse_event_time(first)
     t_str = ev_dt.strftime("%a %d %b %H:%M UTC") if ev_dt else "Upcoming"
-    forecast = e.get("forecast") or "N/A"
-    prev = e.get("previous") or "N/A"
 
-    # Directional scenarios
-    lower_title = title.lower()
-    if any(k in lower_title for k in ("cpi", "inflation", "pce", "rate", "nfp", "employment", "gdp")):
-        if country == "USD":
-            strong_usd_action = "SELL EURUSD, GBPUSD, Gold | BUY USDCAD"
-            weak_usd_action = "BUY EURUSD, GBPUSD, Gold | SELL USDCAD"
-        else:
-            strong_usd_action = f"BUY {country} pairs against USD"
-            weak_usd_action = f"SELL {country} pairs against USD"
+    forecast = first.get("forecast") or "N/A"
+    prev = first.get("previous") or "N/A"
+    strong_act, weak_act = get_directional_actions(country)
 
+    # Check event characteristics
+    is_speech = any(any(w in t.lower() for w in ("speaks", "speech", "press conference", "testimony", "remarks", "minutes")) for t in titles)
+    is_inverse = any(any(w in t.lower() for w in ("unemployment claims", "jobless claims", "claims", "unemployment rate")) for t in titles)
+
+    if is_speech:
         scenarios = (
-            f"\n🎯 Tactical Directional Playbook:"
-            f"\n• Actual > Forecast (Strong {country}):"
-            f"\n  💵 {strong_usd_action}"
-            f"\n• Actual < Forecast (Weak {country}):"
-            f"\n  💵 {weak_usd_action}"
-            f"\n• Inline with Forecast:"
-            f"\n  ⚠️ High risk of initial whipsaw. Wait for M15 candle close."
+            f"🎯 Tactical Directional Playbook (Central Bank Guidance):\n"
+            f"• Hawkish Tone (Slower cuts / Inflation focus -> Strong {country}):\n"
+            f"  💵 {strong_act}\n"
+            f"• Dovish Tone (Urgent cuts / Labor softening -> Weak {country}):\n"
+            f"  💵 {weak_act}\n"
+            f"• Mixed / Neutral Guidance:\n"
+            f"  ⚠️ High whipsaw risk. Wait for post-speech M15 candle displacement."
+        )
+    elif is_inverse:
+        scenarios = (
+            f"🎯 Tactical Directional Playbook (Labor Data - Inverse Impact):\n"
+            f"• Actual < Forecast (Fewer Jobless Claims -> Strong {country}):\n"
+            f"  💵 {strong_act}\n"
+            f"• Actual > Forecast (More Jobless Claims -> Weak {country}):\n"
+            f"  💵 {weak_act}\n"
+            f"• Inline with Forecast:\n"
+            f"  ⚠️ Initial whipsaw risk. Wait for M15 candle close confirmation."
         )
     else:
         scenarios = (
-            f"\n🎯 Volatility Advisory:"
-            f"\n• High institutional volume & spread expansion expected."
-            f"\n• Wait for post-news M15 displacement before manual entry."
+            f"🎯 Tactical Directional Playbook (Economic Release):\n"
+            f"• Actual > Forecast (Economic Beat -> Strong {country}):\n"
+            f"  💵 {strong_act}\n"
+            f"• Actual < Forecast (Economic Miss -> Weak {country}):\n"
+            f"  💵 {weak_act}\n"
+            f"• Inline with Forecast:\n"
+            f"  ⚠️ High initial whipsaw risk. Wait for M15 candle close confirmation."
         )
 
+    if len(titles) == 1:
+        event_header = f"📅 Event: [{country}] {titles[0]}\n🕐 Scheduled: {t_str}\n📊 Consensus: {forecast} · Previous: {prev}"
+    else:
+        event_lines = "\n".join(f"• {t}" for t in titles)
+        event_header = f"📅 Events: [{country}] Scheduled at {t_str}:\n{event_lines}"
+
     msg = (
-        f"🚨 RED-FOLDER NEWS BRIEFING (In 30 Mins)\n"
-        f"{'─' * 26}\n"
-        f"📅 Event: [{country}] {title}\n"
-        f"🕐 Scheduled: {t_str}\n"
-        f"📊 Consensus: {forecast} · Previous: {prev}\n"
-        f"{'─' * 26}"
+        f"🚨 RED-FOLDER NEWS BRIEFING (In ~30 Mins)\n"
+        f"{'─' * 28}\n"
+        f"{event_header}\n"
+        f"{'─' * 28}\n"
         f"{scenarios}\n"
-        f"{'─' * 26}\n"
+        f"{'─' * 28}\n"
         f"🛡️ Bot Execution Safeguards:\n"
         f"• Automated entries PAUSED (-15m to +15m) to avoid spread blowout & slippage.\n"
         f"• Existing winning trades protected at Break-Even (+1 pip).\n"
@@ -234,8 +282,13 @@ def format_news_playbook(e: dict) -> str:
     return msg
 
 
+def format_news_playbook(e: dict) -> str:
+    """Single-event compatibility wrapper."""
+    return format_consolidated_playbook([e])
+
+
 def check_and_send_pre_news_alerts(send_func, chat_id: str | int, lookahead_min: int = 30) -> int:
-    """Check for high-impact events ~30 mins ahead and dispatch tactical briefing to Telegram."""
+    """Check for high-impact events ~30 mins ahead and dispatch tactical briefing to Telegram with zero duplicate spam."""
     if not getattr(config, "NEWS_PLAYBOOK_ENABLED", True) or not chat_id:
         return 0
 
@@ -244,11 +297,14 @@ def check_and_send_pre_news_alerts(send_func, chat_id: str | int, lookahead_min:
     sent_alerts = _load_sent_alerts()
     dispatched = 0
 
+    # Group pending events by (country, event_time_minute) so simultaneous speeches/releases
+    # are consolidated into a single actionable alert instead of sending multiple spam messages
+    time_grouped: dict[tuple[str, str], list[dict]] = {}
+
     for e in events:
         if not is_tier1_event(e):
             continue
         country = str(e.get("country", "")).upper()
-        # Only notify for currencies our agent actually trades
         if country not in {"USD", "EUR", "GBP", "AUD", "CAD", "JPY", "NZD", "CHF"}:
             continue
 
@@ -259,19 +315,26 @@ def check_and_send_pre_news_alerts(send_func, chat_id: str | int, lookahead_min:
         diff_min = (ev_dt - now).total_seconds() / 60.0
         # Trigger window: 20 to 35 minutes before release
         if 20.0 <= diff_min <= 35.0:
-            key = f"{country}:{e.get('title')}:{ev_dt.isoformat()}"
-            if key in sent_alerts:
-                continue
+            key_slot = (country, ev_dt.strftime("%Y-%m-%d %H:%M"))
+            time_grouped.setdefault(key_slot, []).append(e)
 
-            msg = format_news_playbook(e)
-            try:
-                res = send_func(chat_id, msg)
-                if getattr(res, "get", None) and res.get("ok", True):
-                    sent_alerts.add(key)
-                    _save_sent_alerts(sent_alerts)
-                    dispatched += 1
-                    log.info("dispatched pre-news tactical briefing: %s", key)
-            except Exception as ex:
-                log.warning("failed to send news playbook alert: %s", ex)
+    for (country, time_str), ev_list in time_grouped.items():
+        slot_key = f"{country}:{time_str}:{','.join(sorted(x.get('title','') for x in ev_list))}"
+        if slot_key in sent_alerts:
+            continue
+
+        msg = format_consolidated_playbook(ev_list)
+        try:
+            res = send_func(chat_id, msg)
+            # send_func in watcher.py returns boolean True on success; handle dict or bool
+            is_ok = bool(res.get("ok")) if isinstance(res, dict) else (res is True or res is None)
+            if is_ok:
+                sent_alerts.add(slot_key)
+                _save_sent_alerts(sent_alerts)
+                dispatched += 1
+                log.info("dispatched pre-news tactical briefing (exactly once): %s", slot_key)
+        except Exception as ex:
+            log.warning("failed to send news playbook alert: %s", ex)
 
     return dispatched
+
