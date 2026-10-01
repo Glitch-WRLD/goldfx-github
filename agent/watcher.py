@@ -1470,6 +1470,15 @@ def tick() -> bool:
                          symbol, ref_key, cur, sl)
                 ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_sl_breached",
                                       pnl_usd=0.0, classification="sl_already_breached")
+                msg = (
+                    f"🛑 {symbol} — SETUP #{ref_key} SKIPPED (SL BREACHED)\n"
+                    f"{'─' * 26}\n"
+                    f"Market price touched or breached SL ({sl:.5f}) before fill.\n"
+                    f"Current Price: {cur:.5f}\n"
+                    f"Execution safely aborted."
+                )
+                if CHAT_ID:
+                    send(CHAT_ID, msg)
                 continue
 
             # Check B: Never fire if price already reached TP
@@ -1478,19 +1487,40 @@ def tick() -> bool:
                          symbol, ref_key, cur, tp)
                 ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_tp_reached",
                                       pnl_usd=0.0, classification="tp_already_reached")
+                msg = (
+                    f"🎯 {symbol} — SETUP #{ref_key} SKIPPED (TARGET REACHED)\n"
+                    f"{'─' * 26}\n"
+                    f"Price reached Take Profit ({tp:.5f}) before fill could occur.\n"
+                    f"Current Price: {cur:.5f}\n"
+                    f"Anti-Chase: Finished moves are never chased."
+                )
+                if CHAT_ID:
+                    send(CHAT_ID, msg)
                 continue
 
             orig_sl_dist = abs(entry_price - sl)
             orig_tp_dist = abs(tp - entry_price)
 
             # Check C: Adverse drift check (price fell too far towards SL)
-            max_adverse_pct = float(getattr(config, "MAX_ADVERSE_DRIFT_PCT", 0.35))
-            if (direction == 1 and cur < entry_price - max_adverse_pct * orig_sl_dist) or \
-               (direction == -1 and cur > entry_price + max_adverse_pct * orig_sl_dist):
-                log.info("skip %s ref=%s — price drifted too far adverse from entry zone (cur %.5f, entry %.5f)",
-                         symbol, ref_key, cur, entry_price)
+            # Requires adverse drift to exceed 50% of SL AND exceed minimum noise floor (4 pips FX, $0.50 Gold, 15 pts Index)
+            max_adverse_pct = float(getattr(config, "MAX_ADVERSE_DRIFT_PCT", 0.50))
+            is_index_sym = symbol in getattr(config, "INDEX_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"})
+            min_noise_buffer = 0.50 if symbol == "XAUUSD" else (15.0 if is_index_sym else 0.00040)
+            adverse_dist = (entry_price - cur) if direction == 1 else (cur - entry_price)
+            if adverse_dist > (max_adverse_pct * orig_sl_dist) and adverse_dist > min_noise_buffer:
+                log.info("skip %s ref=%s — price drifted too far adverse from entry zone (cur %.5f, entry %.5f, adverse %.5f)",
+                         symbol, ref_key, cur, entry_price, adverse_dist)
                 ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_adverse_drift",
                                       pnl_usd=0.0, classification="adverse_drift_exceeded")
+                msg = (
+                    f"⚠️ {symbol} — SETUP #{ref_key} SKIPPED (ADVERSE DRIFT)\n"
+                    f"{'─' * 26}\n"
+                    f"Price moved too close to Stop Loss before fill.\n"
+                    f"Current: {cur:.5f} · Entry: {entry_price:.5f} · SL: {sl:.5f}\n"
+                    f"Capital Guard: Entry blocked to avoid buying into adverse momentum."
+                )
+                if CHAT_ID:
+                    send(CHAT_ID, msg)
                 continue
 
             # Check D: Anti-Chase Guard (price already ran >25% towards TP)
