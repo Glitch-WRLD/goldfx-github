@@ -275,8 +275,8 @@ def format_consolidated_playbook(ev_list: list[dict]) -> str:
         f"{scenarios}\n"
         f"{'─' * 28}\n"
         f"🛡️ Bot Execution Safeguards:\n"
-        f"• Automated entries PAUSED (-15m to +15m) to avoid spread blowout & slippage.\n"
-        f"• Existing winning trades protected at Break-Even (+1 pip).\n"
+        f"• Automated entries PAUSED (-15m to +15m) on affected [{country}] pairs to avoid spread blowout & slippage.\n"
+        f"• Existing winning [{country}] trades protected at Break-Even (+1 pip).\n"
         f"🎯 Manual traders: Never chase the 1st second spike!"
     )
     return msg
