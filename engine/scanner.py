@@ -45,7 +45,7 @@ def fetch_dxy_df(tf: str = "M15", max_cache_age_sec: float = 60.0) -> pd.DataFra
     # 1. TradingView
     try:
         from data.tv_data import get_df
-        df = get_df("DXY", tf, refresh=False)
+        df = get_df("DXY", tf, refresh=True)
     except Exception:
         pass
 

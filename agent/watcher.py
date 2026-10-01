@@ -299,6 +299,26 @@ def _is_us_open_cooldown(symbol: str) -> bool:
         return False
 
 
+def _is_london_open_cooldown(symbol: str) -> bool:
+    """True if symbol is Forex or Gold and current time is in the 06:50 - 07:20 UTC London cash open window."""
+    if not getattr(config, "LONDON_OPEN_BUFFER_ENABLED", True):
+        return False
+    london_symbols = getattr(
+        config,
+        "LONDON_OPEN_SYMBOLS",
+        {"XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "USDCAD", "AUDUSD", "NZDUSD", "USDCHF", "GBPAUD"},
+    )
+    if symbol not in london_symbols:
+        return False
+    now_utc = dt.datetime.now(dt.timezone.utc).time()
+    try:
+        sh, sm = [int(x) for x in getattr(config, "LONDON_OPEN_START_UTC", "06:50").split(":")]
+        eh, em = [int(x) for x in getattr(config, "LONDON_OPEN_END_UTC", "07:20").split(":")]
+        return dt.time(sh, sm) <= now_utc <= dt.time(eh, em)
+    except Exception:
+        return False
+
+
 def handle_prenew_guards(ledger, ex) -> int:
     """Pre-News Defense: 15 mins before high-impact news, move SL on profitable open trades to BE (+1 pip)."""
     if not getattr(config, "NEWS_PROTECT_PROFITS", True):
@@ -1401,6 +1421,12 @@ def tick() -> bool:
         # US Open Opening Bell Cooldown Check (13:25 - 13:45 UTC for NASDAQ-100, US500, DJ30)
         if _is_us_open_cooldown(symbol):
             log.info("skip %s ref=%s — US Open opening bell volatility cooldown active (13:25 - 13:45 UTC). New entries paused.",
+                     symbol, ref_key)
+            continue
+
+        # London Open Opening Bell Cooldown Check (06:50 - 07:20 UTC for Forex & Gold)
+        if _is_london_open_cooldown(symbol):
+            log.info("skip %s ref=%s — London Open opening bell volatility cooldown active (06:50 - 07:20 UTC). Pausing entries during European cash open purge.",
                      symbol, ref_key)
             continue
 

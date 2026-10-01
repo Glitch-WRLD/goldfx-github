@@ -121,6 +121,22 @@ def parse_event_time(event: dict) -> dt.datetime | None:
         return None
 
 
+def is_tier1_event(e: dict) -> bool:
+    """True if event is High-Impact (Red folder) OR a market-moving Central Bank / Tier-1 release."""
+    impact = str(e.get("impact", "")).capitalize()
+    if impact in ("High", "Red"):
+        return True
+    title = str(e.get("title", "")).lower()
+    # Central Bank Speeches & Rate Decisions
+    if any(w in title for w in ("speaks", "press conference", "rate decision", "statement", "minutes")):
+        if any(k in title for k in ("gov", "president", "chair", "member", "fomc", "boe", "ecb", "snb", "boj", "rba", "powell", "bailey", "lagarde")):
+            return True
+    # Major Tier-1 Economic Indicators
+    if any(k in title for k in ("manufacturing pmi", "services pmi", "unemployment claims", "cpi", "core cpi", "pce", "nfp", "gdp")):
+        return True
+    return False
+
+
 def get_active_news_blackout(
     symbol: str,
     buffer_before_min: int | None = None,
@@ -142,7 +158,7 @@ def get_active_news_blackout(
 
     events = fetch_calendar_events()
     for e in events:
-        if e.get("impact") != "High":
+        if not is_tier1_event(e):
             continue
         country = str(e.get("country", "")).upper()
         if country not in currencies:
@@ -229,7 +245,7 @@ def check_and_send_pre_news_alerts(send_func, chat_id: str | int, lookahead_min:
     dispatched = 0
 
     for e in events:
-        if e.get("impact") != "High":
+        if not is_tier1_event(e):
             continue
         country = str(e.get("country", "")).upper()
         # Only notify for currencies our agent actually trades
