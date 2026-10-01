@@ -177,9 +177,24 @@
   "XAUUSD:2026-09-28T07:30:00+00:00",
   "XAUUSD:2026-09-28T08:00:00+00:00",
   "XAUUSD:2026-09-29T16:00:00+00:00",
-  "XAUUSD:2026-09-29T17:30:00+00:00"
+  "XAUUSD:2026-09-29T17:30:00+00:00",
+  "XAUUSD:2026-10-01T01:30:00+00:00"
  ],
  "history": [
+  {
+   "dir": "SHORT",
+   "entry": 4156.74,
+   "profile": "balanced",
+   "ref": 142,
+   "rr": 1.4,
+   "sl": 4166.677391563553,
+   "strategy_badge": "\ud83d\udd25 DUAL-CONFLUENCE (FVG + SMC Sweep)",
+   "strategy_type": "dual_confluence",
+   "symbol": "XAUUSD",
+   "tf": "M30",
+   "tp": 4142.827651811025,
+   "ts": "2026-10-01T01:30:00+00:00"
+  },
   {
    "dir": "LONG",
    "entry": 30578.1,
@@ -3652,6 +3667,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 141,
+ "ref_seq": 142,
  "zones": []
 }
