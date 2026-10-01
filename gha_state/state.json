@@ -79,6 +79,7 @@
   "NASDAQ-100:2026-10-01T04:30:00+00:00",
   "NASDAQ-100:2026-10-01T05:00:00+00:00",
   "NASDAQ-100:2026-10-01T05:15:00+00:00",
+  "NASDAQ-100:2026-10-01T05:45:00+00:00",
   "NZDUSD:2026-09-22T01:00:00+00:00",
   "NZDUSD:2026-09-23T01:00:00+00:00",
   "NZDUSD:2026-09-23T02:00:00+00:00",
@@ -191,9 +192,38 @@
   "XAUUSD:2026-09-29T16:00:00+00:00",
   "XAUUSD:2026-09-29T17:30:00+00:00",
   "XAUUSD:2026-10-01T01:30:00+00:00",
-  "XAUUSD:2026-10-01T04:30:00+00:00"
+  "XAUUSD:2026-10-01T04:30:00+00:00",
+  "XAUUSD:2026-10-01T05:30:00+00:00"
  ],
  "history": [
+  {
+   "dir": "LONG",
+   "entry": 30848.6,
+   "profile": "balanced",
+   "ref": 157,
+   "rr": 1.4,
+   "sl": 30769.051779511967,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "NASDAQ-100",
+   "tf": "M15",
+   "tp": 30959.967508683243,
+   "ts": "2026-10-01T05:45:00+00:00"
+  },
+  {
+   "dir": "LONG",
+   "entry": 4188.17,
+   "profile": "balanced",
+   "ref": 156,
+   "rr": 1.4,
+   "sl": 4176.165755515304,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "XAUUSD",
+   "tf": "M30",
+   "tp": 4204.975942278575,
+   "ts": "2026-10-01T05:30:00+00:00"
+  },
   {
    "dir": "LONG",
    "entry": 7699.7,
@@ -3925,6 +3955,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 155,
+ "ref_seq": 157,
  "zones": []
 }
