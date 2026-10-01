@@ -33,6 +33,8 @@ for d in (DATA_CACHE, REPORTS):
 # ---- Telegram ----
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 CHAT_ID = os.getenv("CHAT_ID", "")
+AGENT_BOT_TOKEN = os.getenv("AGENT_BOT_TOKEN", BOT_TOKEN)
+AGENT_CHAT_ID = os.getenv("AGENT_CHAT_ID", CHAT_ID)
 
 # ---- Risk / money mgmt (from trader-quality research) ----
 ACCOUNT_BALANCE = float(os.getenv("ACCOUNT_BALANCE", "100.0"))

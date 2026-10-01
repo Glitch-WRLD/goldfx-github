@@ -38,8 +38,8 @@ from strategy.profiles import SYMBOL_RUNTIME
 
 log = logging.getLogger("goldfx.agent")
 
-TOKEN = config.BOT_TOKEN
-CHAT_ID = config.CHAT_ID
+TOKEN = getattr(config, "AGENT_BOT_TOKEN", config.BOT_TOKEN)
+CHAT_ID = getattr(config, "AGENT_CHAT_ID", config.CHAT_ID)
 
 
 def tg(method: str, **params) -> dict:
