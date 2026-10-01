@@ -112,7 +112,7 @@ AGENT_STATE_URL = os.getenv(
 MAX_CONCURRENT_TRADES   = int(os.getenv("MAX_CONCURRENT_TRADES", "14"))         # max total open trades across all pairs & indices
 MAX_AT_RISK_TRADES      = int(os.getenv("MAX_AT_RISK_TRADES", "8"))             # max trades with capital actively at risk (< BE)
 MAX_TRADES_PER_SYMBOL   = int(os.getenv("MAX_TRADES_PER_SYMBOL", "2"))         # max concurrent total trades on single symbol (if 1st is at BE)
-MAX_AT_RISK_PER_SYMBOL  = int(os.getenv("MAX_AT_RISK_PER_SYMBOL", "1"))        # max 1 unhedged trade per symbol (< BE) to prevent double stopouts
+MAX_AT_RISK_PER_SYMBOL  = int(os.getenv("MAX_AT_RISK_PER_SYMBOL", "2"))        # max 2 unhedged trades per symbol (< BE) as designed
 MAX_TOTAL_PER_SYMBOL    = int(os.getenv("MAX_TOTAL_PER_SYMBOL", "3"))          # max total trades on single symbol (allows runners if prior are at BE)
 MAX_PORTFOLIO_RISK_PCT  = float(os.getenv("MAX_PORTFOLIO_RISK_PCT", "35.0"))  # max cumulative unprotected risk % (user approved 35%)
 LOCAL_TP_GUARD_ENABLED = os.getenv("LOCAL_TP_GUARD_ENABLED", "1") == "1"     # close immediately if chart price touches TP
@@ -124,20 +124,20 @@ ROLLOVER_MIN_MARGIN_LEVEL_PCT = float(os.getenv("ROLLOVER_MIN_MARGIN_LEVEL_PCT",
 # ---- Account-Size Tiered Trade Capacity ----
 def dynamic_portfolio_capacity(balance: float, is_cent: bool = False) -> tuple[int, int, int, float, str]:
     """Return (max_total_trades, max_at_risk_trades, max_trades_per_sym, max_portfolio_risk_pct, tier_name):
-    - Cent Accounts: Run on Tier 3 High-Capacity (14 Total Max, 8 At-Risk Max, 1 At-Risk/Pair, 35% max open risk)
+    - Cent Accounts: Run on Tier 3 High-Capacity (14 Total Max, 8 At-Risk Max, 2/Pair, 35% max open risk)
     - Standard Accounts < $50:  4 Total Max, 3 At-Risk Max, 1/Pair, 20% max open risk (Tier 1: Small Balance)
     - Standard Accounts $50-$500: 6 Total Max, 4 At-Risk Max, 1/Pair, 25% max open risk (Tier 2: Mid Balance)
-    - Standard Accounts $500+:  14 Total Max, 8 At-Risk Max, 1/Pair, 35% max open risk (Tier 3: Institutional Free)
+    - Standard Accounts $500+:  14 Total Max, 8 At-Risk Max, 2/Pair, 35% max open risk (Tier 3: Institutional Free)
     """
     if is_cent:
-        return 14, 8, 1, 35.0, f"Cent Account Tier 3 High-Capacity (Micro-Scale: {balance:.0f} USC · 14 Total / 8 At-Risk Max · 1/Pair At-Risk)"
+        return 14, 8, 2, 35.0, f"Cent Account Tier 3 High-Capacity (Micro-Scale: {balance:.0f} USC · 14 Total / 8 At-Risk Max · 2/Pair)"
 
     if balance < 50.0:
         return 4, 3, 1, 20.0, f"Tier 1 (<$50 Standard · ${balance:.2f} · 4 Total / 3 At-Risk Max · 1/Pair)"
     elif balance < 500.0:
         return 6, 4, 1, 25.0, f"Tier 2 ($50-$500 Standard · ${balance:.2f} · 6 Total / 4 At-Risk Max · 1/Pair)"
     else:
-        return 14, 8, 1, 35.0, f"Tier 3 ($500+ Standard · ${balance:.2f} · 14 Total / 8 At-Risk Max · 1/Pair)"
+        return 14, 8, 2, 35.0, f"Tier 3 ($500+ Standard · ${balance:.2f} · 14 Total / 8 At-Risk Max · 2/Pair)"
 
 # ---- Smart Reversal Early Exit (Asset-Specific: XAUUSD only) ----
 GOLD_REVERSAL_EXIT_ENABLED = os.getenv("GOLD_REVERSAL_EXIT_ENABLED", "1") == "1"
