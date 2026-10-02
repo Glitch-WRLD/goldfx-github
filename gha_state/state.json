@@ -219,9 +219,24 @@
   "XAUUSD:2026-10-01T06:00:00+00:00",
   "XAUUSD:2026-10-02T05:00:00+00:00",
   "XAUUSD:2026-10-02T12:00:00+00:00",
-  "XAUUSD:2026-10-02T15:30:00+00:00"
+  "XAUUSD:2026-10-02T15:30:00+00:00",
+  "XAUUSD:2026-10-02T20:00:00+00:00"
  ],
  "history": [
+  {
+   "dir": "SHORT",
+   "entry": 4143.36,
+   "profile": "balanced",
+   "ref": 184,
+   "rr": 1.17,
+   "sl": 4158.870257228099,
+   "strategy_badge": "\ud83d\udd25 DUAL-CONFLUENCE (FVG + SMC Sweep)",
+   "strategy_type": "dual_confluence",
+   "symbol": "XAUUSD",
+   "tf": "M30",
+   "tp": 4125.275,
+   "ts": "2026-10-02T20:00:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 4134.825,
@@ -2869,17 +2884,6 @@
    "tf": "M30",
    "tp": 4253.635,
    "ts": "2026-09-15T07:00:00+00:00"
-  },
-  {
-   "dir": "SHORT",
-   "entry": 4289.56,
-   "profile": "balanced",
-   "rr": 2.69,
-   "sl": 4302.902426135144,
-   "symbol": "XAUUSD",
-   "tf": "M30",
-   "tp": 4253.635,
-   "ts": "2026-09-15T06:00:00+00:00"
   }
  ],
  "offset": 821843586,
@@ -4412,6 +4416,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 183,
+ "ref_seq": 184,
  "zones": []
 }
