@@ -148,18 +148,18 @@ GOLD_REVERSAL_TF           = os.getenv("GOLD_REVERSAL_TF", "M15")
 TRAIL_MODE                 = os.getenv("TRAIL_MODE", "PERCENTAGE")            # "PERCENTAGE" (proportional to TP) or "FIXED_R"
 BREAKEVEN_PCT_TP           = float(os.getenv("BREAKEVEN_PCT_TP", "50.0"))     # Stage 1: Move SL to BE (+1 pip) when price reaches >= 50% of TP
 BREAKEVEN_PCT_TP_GBPAUD    = float(os.getenv("BREAKEVEN_PCT_TP_GBPAUD", "70.0")) # Stage 1 GBPAUD: Wider BE buffer (70% TP) for deep SMC inducement retests
-TRAIL_STAGE1_PCT_TP        = float(os.getenv("TRAIL_STAGE1_PCT_TP", "75.0"))  # Stage 2: Trail SL when price reaches >= 75% of TP
+TRAIL_STAGE1_PCT_TP        = float(os.getenv("TRAIL_STAGE1_PCT_TP", "85.0"))  # Stage 2: Trail SL when price reaches >= 85% of TP (widened from 75% so winners run)
 TRAIL_STAGE1_PCT_TP_GBPAUD = float(os.getenv("TRAIL_STAGE1_PCT_TP_GBPAUD", "85.0")) # Stage 2 GBPAUD: Trail SL when price reaches >= 85% of TP
-TRAIL_STAGE1_LOCK_PCT      = float(os.getenv("TRAIL_STAGE1_LOCK_PCT", "50.0"))# Lock in 50% of target profit at Stage 2
-TRAIL_STAGE2_PCT_TP        = float(os.getenv("TRAIL_STAGE2_PCT_TP", "90.0"))  # Stage 3: Trail SL when price reaches >= 90% of TP
-TRAIL_STAGE2_LOCK_PCT      = float(os.getenv("TRAIL_STAGE2_LOCK_PCT", "75.0"))# Lock in 75% of target profit at Stage 3
+TRAIL_STAGE1_LOCK_PCT      = float(os.getenv("TRAIL_STAGE1_LOCK_PCT", "70.0"))# Lock in 70% of target profit at Stage 2 (raised from 50% to ensure large wins)
+TRAIL_STAGE2_PCT_TP        = float(os.getenv("TRAIL_STAGE2_PCT_TP", "92.0"))  # Stage 3: Trail SL when price reaches >= 92% of TP
+TRAIL_STAGE2_LOCK_PCT      = float(os.getenv("TRAIL_STAGE2_LOCK_PCT", "80.0"))# Lock in 80% of target profit at Stage 3
 
 # Fallback / Fixed R settings
 BREAKEVEN_MFE_R            = float(os.getenv("BREAKEVEN_MFE_R", "0.8"))      # Stage 1: Move SL to BE (+1 pip buffer) at >= 0.8R
-TRAIL_STAGE1_MFE_R         = float(os.getenv("TRAIL_STAGE1_MFE_R", "1.3"))   # Stage 2: Trail SL to +0.5R profit at >= 1.3R
-TRAIL_STAGE1_LOCK_R        = float(os.getenv("TRAIL_STAGE1_LOCK_R", "0.5"))  # Locked R for Stage 2 (+0.5R)
-TRAIL_STAGE2_MFE_R         = float(os.getenv("TRAIL_STAGE2_MFE_R", "1.6"))   # Stage 3: Trail SL to +1.0R profit at >= 1.6R
-TRAIL_STAGE2_LOCK_R        = float(os.getenv("TRAIL_STAGE2_LOCK_R", "1.0"))  # Locked R for Stage 3 (+1.0R)
+TRAIL_STAGE1_MFE_R         = float(os.getenv("TRAIL_STAGE1_MFE_R", "1.5"))   # Stage 2: Trail SL to +0.8R profit at >= 1.5R (widened from 1.3R -> 0.5R)
+TRAIL_STAGE1_LOCK_R        = float(os.getenv("TRAIL_STAGE1_LOCK_R", "0.8"))  # Locked R for Stage 2 (+0.8R)
+TRAIL_STAGE2_MFE_R         = float(os.getenv("TRAIL_STAGE2_MFE_R", "1.8"))   # Stage 3: Trail SL to +1.2R profit at >= 1.8R
+TRAIL_STAGE2_LOCK_R        = float(os.getenv("TRAIL_STAGE2_LOCK_R", "1.2"))  # Locked R for Stage 3 (+1.2R)
 
 # ---- DXY Macro Momentum Filter (Forex Pairs Only) ----
 DXY_FILTER_ENABLED         = os.getenv("DXY_FILTER_ENABLED", "1") == "1"     # 1 = Filter pure Forex by US Dollar index momentum

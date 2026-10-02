@@ -786,17 +786,17 @@ def manage_open_positions(ledger) -> int:
             t1_pct = float(getattr(config, "TRAIL_STAGE1_PCT_TP_GBPAUD", 85.0))
         else:
             be_pct = float(getattr(config, "BREAKEVEN_PCT_TP", 50.0))
-            t1_pct = float(getattr(config, "TRAIL_STAGE1_PCT_TP", 75.0))
-        t1_lock_pct = float(getattr(config, "TRAIL_STAGE1_LOCK_PCT", 50.0)) / 100.0
-        t2_pct = float(getattr(config, "TRAIL_STAGE2_PCT_TP", 90.0))
-        t2_lock_pct = float(getattr(config, "TRAIL_STAGE2_LOCK_PCT", 75.0)) / 100.0
+            t1_pct = float(getattr(config, "TRAIL_STAGE1_PCT_TP", 85.0))
+        t1_lock_pct = float(getattr(config, "TRAIL_STAGE1_LOCK_PCT", 70.0)) / 100.0
+        t2_pct = float(getattr(config, "TRAIL_STAGE2_PCT_TP", 92.0))
+        t2_lock_pct = float(getattr(config, "TRAIL_STAGE2_LOCK_PCT", 80.0)) / 100.0
 
         # Fallback / Fixed R parameters
         be_threshold = float(getattr(config, "BREAKEVEN_MFE_R", 0.8))
-        trail1_threshold = float(getattr(config, "TRAIL_STAGE1_MFE_R", 1.3))
-        trail1_lock = float(getattr(config, "TRAIL_STAGE1_LOCK_R", 0.5))
-        trail2_threshold = float(getattr(config, "TRAIL_STAGE2_MFE_R", 1.6))
-        trail2_lock = float(getattr(config, "TRAIL_STAGE2_LOCK_R", 1.0))
+        trail1_threshold = float(getattr(config, "TRAIL_STAGE1_MFE_R", 1.5))
+        trail1_lock = float(getattr(config, "TRAIL_STAGE1_LOCK_R", 0.8))
+        trail2_threshold = float(getattr(config, "TRAIL_STAGE2_MFE_R", 1.8))
+        trail2_lock = float(getattr(config, "TRAIL_STAGE2_LOCK_R", 1.2))
 
         point = ex.get_point(symbol) if hasattr(ex, "get_point") else (0.01 if symbol == "XAUUSD" or "JPY" in symbol else 0.00001)
         digits = 5 if point < 0.01 else 2
@@ -810,8 +810,8 @@ def manage_open_positions(ledger) -> int:
             trail_stage2_sl = round(fill_price + (t1_lock_pct * target_dist), digits) if direction == 1 else round(fill_price - (t1_lock_pct * target_dist), digits)
             s3_locked_usd = float(pos.get("risk_usd", 100.0)) * (rr * t2_lock_pct)
             s2_locked_usd = float(pos.get("risk_usd", 100.0)) * (rr * t1_lock_pct)
-            s3_label = f"75% of target ({rr * t2_lock_pct:.2f}R)"
-            s2_label = f"50% of target ({rr * t1_lock_pct:.2f}R)"
+            s3_label = f"{t2_lock_pct * 100:.0f}% of target ({rr * t2_lock_pct:.2f}R)"
+            s2_label = f"{t1_lock_pct * 100:.0f}% of target ({rr * t1_lock_pct:.2f}R)"
         else:
             is_stage3 = (mfe_r >= trail2_threshold or peak_mfe >= trail2_threshold)
             is_stage2 = (mfe_r >= trail1_threshold or peak_mfe >= trail1_threshold)
