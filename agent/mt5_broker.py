@@ -284,6 +284,22 @@ class Mt5Broker:
             })
         return res
 
+    def has_position_with_ref(self, ref_key: str | int) -> bool:
+        """Check if terminal currently has an active open position for this setup ref."""
+        mt5 = _import_mt5()
+        ref_tag = f"#{ref_key}"
+        try:
+            positions = mt5.positions_get()
+            if not positions:
+                return False
+            for p in positions:
+                comment = getattr(p, "comment", "") or ""
+                if ref_tag in comment:
+                    return True
+        except Exception as e:
+            log.warning("has_position_with_ref error: %s", e)
+        return False
+
     def close_position_by_ticket(self, ticket: int | str) -> Fill:
         """Close a specific position by its ticket number."""
         mt5 = _import_mt5()

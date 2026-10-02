@@ -99,6 +99,10 @@ def _save_pending(messages: list[dict]) -> None:
 
 def _enqueue(chat_id: str | int, text: str) -> None:
     pending = _load_pending()
+    # Deduplicate: do not queue duplicate message text
+    if any(m.get("chat_id") == str(chat_id) and m.get("text") == text for m in pending):
+        log.debug("telegram _enqueue skipped duplicate pending message")
+        return
     pending.append({"chat_id": str(chat_id), "text": text,
                     "ts": time.time()})
     _save_pending(pending)
@@ -1342,6 +1346,12 @@ def tick() -> bool:
     for entry in reversed(history):
         ref_key = _to_ref_key(entry)
         if ledger.has(ref_key):
+            continue
+
+        # Broker-level duplicate execution defense
+        if hasattr(ex, "has_position_with_ref") and ex.has_position_with_ref(ref_key):
+            log.warning("skip %s ref=%s — broker already has an open position for this setup ref! Duplicate blocked.",
+                        entry.get("symbol", ""), ref_key)
             continue
         symbol = entry.get("symbol", "")
         direction = _entry_dir(entry)

@@ -12,12 +12,35 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import ctypes
 import logging
-from agent.watcher import run_agent
+
+_MUTEX_HANDLE = None
+
+
+def acquire_single_instance_mutex(mutex_name: str = "Local\\GoldFX_Agent_SingleInstance_Mutex") -> bool:
+    """Ensure strictly ONE instance of goldfx-agent runs on the machine at any time."""
+    global _MUTEX_HANDLE
+    try:
+        kernel32 = ctypes.windll.kernel32
+        _MUTEX_HANDLE = kernel32.CreateMutexW(None, True, mutex_name)
+        if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+            return False
+        return True
+    except Exception:
+        return True
+
 
 if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s %(message)s"
     )
+    if not acquire_single_instance_mutex():
+        logging.getLogger("goldfx.agent").critical(
+            "DUPLICATE INSTANCE BLOCKED: Another instance of goldfx-agent is already running on this machine! Exiting immediately to prevent double orders."
+        )
+        sys.exit(0)
+
+    from agent.watcher import run_agent
     run_agent()

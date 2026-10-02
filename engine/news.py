@@ -323,16 +323,15 @@ def check_and_send_pre_news_alerts(send_func, chat_id: str | int, lookahead_min:
         if slot_key in sent_alerts:
             continue
 
+        # Record slot_key immediately to prevent re-triggering during network disconnects
+        sent_alerts.add(slot_key)
+        _save_sent_alerts(sent_alerts)
+
         msg = format_consolidated_playbook(ev_list)
         try:
             res = send_func(chat_id, msg)
-            # send_func in watcher.py returns boolean True on success; handle dict or bool
-            is_ok = bool(res.get("ok")) if isinstance(res, dict) else (res is True or res is None)
-            if is_ok:
-                sent_alerts.add(slot_key)
-                _save_sent_alerts(sent_alerts)
-                dispatched += 1
-                log.info("dispatched pre-news tactical briefing (exactly once): %s", slot_key)
+            dispatched += 1
+            log.info("dispatched pre-news tactical briefing (exactly once): %s", slot_key)
         except Exception as ex:
             log.warning("failed to send news playbook alert: %s", ex)
 
