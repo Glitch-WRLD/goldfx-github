@@ -1679,10 +1679,17 @@ def tick() -> bool:
             float(e.get("risk_usd", 0.0)) for e in at_risk_positions
         )
         current_unprotected_risk_pct = (unprotected_risk_usd / rm.balance * 100.0) if rm.balance > 0 else 0.0
-        if current_unprotected_risk_pct + rm.risk_pct > max_portfolio_risk_pct:
-            log.info("skip %s ref=%s — portfolio risk limit reached (open risk %.1f%% + new %.1f%% > max %.1f%%)",
-                     symbol, ref_key, current_unprotected_risk_pct, rm.risk_pct, max_portfolio_risk_pct)
+        
+        # High-Capacity Dynamic Headroom:
+        # Instead of skipping a valid trade when open risk is close to the cap,
+        # dynamically scale risk down to fit the remaining budget (minimum 2.5% risk).
+        remaining_risk_pct = max_portfolio_risk_pct - current_unprotected_risk_pct
+        if remaining_risk_pct < 2.5:
+            log.info("skip %s ref=%s — portfolio risk limit reached (open risk %.1f%% / max %.1f%%, headroom %.1f%% < 2.5%%)",
+                     symbol, ref_key, current_unprotected_risk_pct, max_portfolio_risk_pct, remaining_risk_pct)
             continue
+
+        trade_risk_pct = min(rm.risk_pct, remaining_risk_pct)
 
         entry_price = float(entry.get("entry", 0))
         sl = float(entry.get("sl", 0))
@@ -1965,7 +1972,7 @@ def tick() -> bool:
                          symbol, ref_key, actual_rr, cur, sl, tp)
                 continue
 
-            risk_usd = rm.balance * rm.risk_pct / 100.0
+            risk_usd = rm.balance * trade_risk_pct / 100.0
             lots_raw = position_size(symbol, risk_usd, actual_sl_dist)
             lots = floor_lots(symbol, lots_raw)
 
@@ -2002,7 +2009,7 @@ def tick() -> bool:
                             f"\U0001F7E1 {symbol} \u2014 PENDING M5 PULLBACK SNIPER"
                             f"\n{'\u2500' * 26}"
                             f"\nSetup #{ref_key} \u00b7 {d_str} @ {cur:.2f}"
-                            f"\nLive SL distance (${actual_sl_dist:.2f}) exceeds our ${risk_usd:.2f} risk budget ({rm.risk_pct}%)."
+                            f"\nLive SL distance (${actual_sl_dist:.2f}) exceeds our ${risk_usd:.2f} risk budget ({trade_risk_pct:.1f}%)."
                             f"\nBot will wait for 25%–50% pullback + local M5 reversal structure to enter safely."
                             f"\n{'\u2500' * 26}"
                             f"\n\u26A0\ufe0f Capital preservation guard active."
@@ -2011,7 +2018,7 @@ def tick() -> bool:
                             send(CHAT_ID, msg)
                     continue
                 log.info("skip %s ref=%s — required lot (%.4f) < broker min (0.01). Min lot would risk $%.2f (%.1f%% of balance), exceeding our %.1f%% budget ($%.2f). Capital preserved.",
-                         symbol, ref_key, lots_raw, min_risk, (min_risk / rm.balance) * 100, rm.risk_pct, risk_usd)
+                         symbol, ref_key, lots_raw, min_risk, (min_risk / rm.balance) * 100, trade_risk_pct, risk_usd)
                 continue
 
             label = f"goldfx #{ref_key}" if str(ref_key).isdigit() else f"goldfx {ref_key}"

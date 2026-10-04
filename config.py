@@ -58,8 +58,8 @@ GOLD_QUARANTINE_ENABLED = os.getenv("GOLD_QUARANTINE_ENABLED", "1") == "1"
 MIN_GOLD_BALANCE = float(os.getenv("MIN_GOLD_BALANCE", "100.0"))        # Below $100: Gold must use tight sniper; below $50: Gold quarantined
 MIN_GOLD_ABSOLUTE_BALANCE = float(os.getenv("MIN_GOLD_ABSOLUTE_BALANCE", "50.0")) # Complete quarantine for Gold below $50 (margin risk)
 IS_CENT_ACCOUNT = os.getenv("IS_CENT_ACCOUNT", "0") == "1"              # Set 1 if using a Cent/Micro account (bypasses quarantine)
-MAX_CHASE_TP_PCT = float(os.getenv("MAX_CHASE_TP_PCT", "0.25"))         # Never chase if price already ran >25% towards TP
-MAX_ADVERSE_DRIFT_PCT = float(os.getenv("MAX_ADVERSE_DRIFT_PCT", "0.35"))# Never chase if price ran >35% adverse towards SL
+MAX_CHASE_TP_PCT = float(os.getenv("MAX_CHASE_TP_PCT", "0.35"))         # Allow market entry up to 35% of move to TP (retains >1.3 RR)
+MAX_ADVERSE_DRIFT_PCT = float(os.getenv("MAX_ADVERSE_DRIFT_PCT", "0.50"))# Allow entry unless price drifted >50% adverse towards SL
 
 # ---- Daily Broker Rollover Protection (Headway 23:45 - 00:25 UTC) ----
 ROLLOVER_START_UTC = os.getenv("ROLLOVER_START_UTC", "23:45")             # Pre-rollover start (when spreads widen)
@@ -109,12 +109,12 @@ AGENT_STATE_URL = os.getenv(
 )
 
 # ---- Portfolio Exposure & Risk Budgeting ----
-MAX_CONCURRENT_TRADES   = int(os.getenv("MAX_CONCURRENT_TRADES", "14"))         # max total open trades across all pairs & indices
-MAX_AT_RISK_TRADES      = int(os.getenv("MAX_AT_RISK_TRADES", "8"))             # max trades with capital actively at risk (< BE)
-MAX_TRADES_PER_SYMBOL   = int(os.getenv("MAX_TRADES_PER_SYMBOL", "2"))         # max concurrent total trades on single symbol (if 1st is at BE)
-MAX_AT_RISK_PER_SYMBOL  = int(os.getenv("MAX_AT_RISK_PER_SYMBOL", "2"))        # max 2 unhedged trades per symbol (< BE) as designed
-MAX_TOTAL_PER_SYMBOL    = int(os.getenv("MAX_TOTAL_PER_SYMBOL", "3"))          # max total trades on single symbol (allows runners if prior are at BE)
-MAX_PORTFOLIO_RISK_PCT  = float(os.getenv("MAX_PORTFOLIO_RISK_PCT", "35.0"))  # max cumulative unprotected risk % (user approved 35%)
+MAX_CONCURRENT_TRADES   = int(os.getenv("MAX_CONCURRENT_TRADES", "20"))         # max total open trades across all pairs & indices
+MAX_AT_RISK_TRADES      = int(os.getenv("MAX_AT_RISK_TRADES", "12"))            # max trades with capital actively at risk (< BE)
+MAX_TRADES_PER_SYMBOL   = int(os.getenv("MAX_TRADES_PER_SYMBOL", "3"))          # max concurrent at-risk trades on single symbol
+MAX_AT_RISK_PER_SYMBOL  = int(os.getenv("MAX_AT_RISK_PER_SYMBOL", "3"))        # max 3 unhedged trades per symbol (< BE) as designed
+MAX_TOTAL_PER_SYMBOL    = int(os.getenv("MAX_TOTAL_PER_SYMBOL", "5"))          # max total trades on single symbol (allows runners if prior are at BE)
+MAX_PORTFOLIO_RISK_PCT  = float(os.getenv("MAX_PORTFOLIO_RISK_PCT", "50.0"))   # max cumulative unprotected risk % (accommodates high-capacity)
 LOCAL_TP_GUARD_ENABLED = os.getenv("LOCAL_TP_GUARD_ENABLED", "1") == "1"     # close immediately if chart price touches TP
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.5"))                 # max FX spread (pips) for market entry
 MAX_SPREAD_GOLD = float(os.getenv("MAX_SPREAD_GOLD", "1.50"))          # max XAUUSD spread ($) for market entry
@@ -124,20 +124,20 @@ ROLLOVER_MIN_MARGIN_LEVEL_PCT = float(os.getenv("ROLLOVER_MIN_MARGIN_LEVEL_PCT",
 # ---- Account-Size Tiered Trade Capacity ----
 def dynamic_portfolio_capacity(balance: float, is_cent: bool = False) -> tuple[int, int, int, float, str]:
     """Return (max_total_trades, max_at_risk_trades, max_trades_per_sym, max_portfolio_risk_pct, tier_name):
-    - Cent Accounts: Run on Tier 3 High-Capacity (14 Total Max, 8 At-Risk Max, 2/Pair, 35% max open risk)
-    - Standard Accounts < $50:  4 Total Max, 3 At-Risk Max, 1/Pair, 20% max open risk (Tier 1: Small Balance)
-    - Standard Accounts $50-$500: 6 Total Max, 4 At-Risk Max, 1/Pair, 25% max open risk (Tier 2: Mid Balance)
-    - Standard Accounts $500+:  14 Total Max, 8 At-Risk Max, 2/Pair, 35% max open risk (Tier 3: Institutional Free)
+    - Cent Accounts: Run on Tier 3 High-Capacity (20 Total Max, 12 At-Risk Max, 3/Pair At-Risk, 5/Pair Total, 50% max open risk)
+    - Standard Accounts < $50:  6 Total Max, 4 At-Risk Max, 1/Pair At-Risk, 2/Pair Total, 25% max open risk (Tier 1: Small Balance)
+    - Standard Accounts $50-$500: 10 Total Max, 6 At-Risk Max, 2/Pair At-Risk, 3/Pair Total, 35% max open risk (Tier 2: Mid Balance)
+    - Standard Accounts $500+:  20 Total Max, 12 At-Risk Max, 3/Pair At-Risk, 5/Pair Total, 50% max open risk (Tier 3: High Capacity)
     """
     if is_cent:
-        return 14, 8, 2, 35.0, f"Cent Account Tier 3 High-Capacity (Micro-Scale: {balance:.0f} USC · 14 Total / 8 At-Risk Max · 2/Pair)"
+        return 20, 12, 3, 50.0, f"Cent Account Tier 3 High-Capacity (Micro-Scale: {balance:.0f} USC · 20 Total / 12 At-Risk Max · 3/Pair At-Risk · 5/Pair Total)"
 
     if balance < 50.0:
-        return 4, 3, 1, 20.0, f"Tier 1 (<$50 Standard · ${balance:.2f} · 4 Total / 3 At-Risk Max · 1/Pair)"
+        return 6, 4, 1, 25.0, f"Tier 1 (<$50 Standard · ${balance:.2f} · 6 Total / 4 At-Risk Max · 1/Pair)"
     elif balance < 500.0:
-        return 6, 4, 1, 25.0, f"Tier 2 ($50-$500 Standard · ${balance:.2f} · 6 Total / 4 At-Risk Max · 1/Pair)"
+        return 10, 6, 2, 35.0, f"Tier 2 ($50-$500 Standard · ${balance:.2f} · 10 Total / 6 At-Risk Max · 2/Pair)"
     else:
-        return 14, 8, 2, 35.0, f"Tier 3 ($500+ Standard · ${balance:.2f} · 14 Total / 8 At-Risk Max · 2/Pair)"
+        return 20, 12, 3, 50.0, f"Tier 3 ($500+ Standard · ${balance:.2f} · 20 Total / 12 At-Risk Max · 3/Pair At-Risk · 5/Pair Total)"
 
 # ---- Smart Reversal Early Exit (Asset-Specific: XAUUSD only) ----
 GOLD_REVERSAL_EXIT_ENABLED = os.getenv("GOLD_REVERSAL_EXIT_ENABLED", "1") == "1"
