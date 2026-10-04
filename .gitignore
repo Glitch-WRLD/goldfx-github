@@ -10,6 +10,8 @@ __pycache__/
 bot.log
 bot_state.json
 agent/ledger.json
+logs/
+data/pending_*.json
 *.png
 *.bmp
 

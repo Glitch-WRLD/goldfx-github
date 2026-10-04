@@ -32,9 +32,19 @@ def acquire_single_instance_mutex(mutex_name: str = "Local\\GoldFX_Agent_SingleI
 
 
 if __name__ == "__main__":
+    base_dir = Path(__file__).resolve().parents[1]
+    log_dir = base_dir / "logs"
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / "agent.log"
+
+    handlers = [
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(log_file, encoding="utf-8")
+    ]
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s %(name)s %(levelname)s %(message)s"
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+        handlers=handlers
     )
     if not acquire_single_instance_mutex():
         logging.getLogger("goldfx.agent").critical(

@@ -2092,6 +2092,15 @@ def tick() -> bool:
 # Main loop
 # ---------------------------------------------------------------------------
 def run_agent():
+    log_dir = Path(__file__).resolve().parents[1] / "logs"
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / "agent.log"
+    root = logging.getLogger()
+    if not any(isinstance(h, logging.FileHandler) for h in root.handlers):
+        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
+        root.addHandler(fh)
+
     interval = int(config.AGENT_POLL_SEC)
     log.info("goldfx-agent starting  env=%s  poll=%ds  state_url=%s",
              config.AUTO_TRADE_ENV, interval, _STATE_CACHE)

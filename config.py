@@ -23,7 +23,7 @@ SYMBOLS = {
     "DXY": "TVC:DXY",
 }
 # map brand names -> tradingview-sdk Interval
-TIMEFRAMES = ["M15", "M30", "H1", "H2"]
+TIMEFRAMES = ["M15", "M30", "H1", "H2", "H4"]
 
 DATA_CACHE = BASE_DIR / "data_cache"
 REPORTS = BASE_DIR / "reports"
