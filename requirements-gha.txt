@@ -1,4 +1,5 @@
 # Minimal deps for the GitHub Actions scheduler runner (gha_scan.py).
 # Keeps each workflow tick fast: no telegram lib, no pyarrow, no dotenv extras.
 tradingview-sdk[pandas]
-python-dotenv
+selectolax<1.0
+python-dotenv

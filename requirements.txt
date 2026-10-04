@@ -1,4 +1,5 @@
 tradingview-sdk[pandas]
+selectolax<1.0
 python-telegram-bot[job-queue]
 python-dotenv
 pandas
