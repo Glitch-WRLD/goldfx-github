@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config import DATA_CACHE, SYMBOLS, TIMEFRAMES
 
 _INTERVAL = {
+    "M5": Interval.MIN_5,
     "M15": Interval.MIN_15,
     "M30": Interval.MIN_30,
     "H1": Interval.HOUR_1,

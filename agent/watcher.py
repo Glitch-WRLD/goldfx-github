@@ -266,7 +266,10 @@ def _format_fill_message(fill: Fill, entry: dict) -> str:
     emoji = "\U0001F7E2" if fill.direction == 1 else "\U0001F534"
     ref = entry.get("ref")
     ref_line = f"  \u00b7 setup #{int(ref):04d}" if ref is not None else ""
-    ltf_line = "\n\u2705 LTF Confirmation: M15 confirmed entry direction" if entry.get("ltf_confirmed") else ""
+    badge = entry.get("strategy_badge", "⚡ Momentum FVG")
+    ltf_line = f"\n🎯 Concept: {badge}"
+    if entry.get("ltf_confirmed"):
+        ltf_line += f" · [{entry.get('entry_tf', 'M15')} Confirmed]"
     return (
         f"{emoji} {fill.symbol} \u2014 AUTO-FILLED {d}{ref_line}"
         f"\n{'\u2500' * 26}"

@@ -641,8 +641,148 @@ class FVGScanner:
                 if sig is not None:
                     out.append(sig)
 
+        # Strategy 3: Institutional Session Delivery Engine (ISDE Precision Delivery)
+        if getattr(config, "ISDE_ENABLED", True) and symbol in getattr(config, "ISDE_WINDOWS", {}):
+            try:
+                isde_sigs = self.scan_isde_signals(symbol, lookback=lookback)
+                if isde_sigs:
+                    out.extend(isde_sigs)
+            except Exception as e:
+                log.warning("ISDE scan failed for %s: %s", symbol, e)
+
         out.sort(key=lambda x: x.ts)
         return out
+
+    def scan_isde_signals(self, symbol: str, lookback: int = 40) -> list[ScanSignal]:
+        """Scan for high-conviction Institutional Session Delivery Engine (ISDE) setups.
+        Active during London Open (07:00-09:00 UTC) for Gold & Yen, and NY Silver Bullet
+        (14:00-15:00 UTC) for Dow 30, EURUSD, and GBPUSD.
+        """
+        if not getattr(config, "ISDE_ENABLED", True):
+            return []
+        cfg = getattr(config, "ISDE_WINDOWS", {}).get(symbol)
+        if not cfg:
+            return []
+
+        try:
+            df_m5 = get_df(symbol, "M5", refresh=True)
+            df_h1 = get_df(symbol, "H1", refresh=False)
+            if df_m5 is None or len(df_m5) < 50 or df_h1 is None or len(df_h1) < 50:
+                return []
+
+            sh = cfg.get("start_utc", 7)
+            eh = cfg.get("end_utc", 9)
+            min_gap_pts = cfg.get("min_gap", 1.5)
+            bias_htf = cfg.get("bias_htf", "H1")
+
+            h1_ema = df_h1["close"].ewm(span=50).mean()
+            point = 0.01 if "JPY" in symbol or symbol == "XAUUSD" or any(x in symbol for x in ["100", "500", "30"]) else 0.0001
+            pt_div = 0.01 if symbol in ["XAUUSD", "DJ30"] else point
+
+            sub_m5 = df_m5.iloc[-max(lookback * 3, 120):].copy()
+            last_closed_idx = len(sub_m5) - 2
+
+            out: list[ScanSignal] = []
+
+            for i in range(2, len(sub_m5)):
+                if i > last_closed_idx:
+                    continue
+                if last_closed_idx - i >= lookback:
+                    continue
+
+                cur_t = sub_m5.index[i]
+                cur_utc_hour = cur_t.tz_convert("UTC").hour if hasattr(cur_t, "tz_convert") else cur_t.hour
+
+                if not (sh <= cur_utc_hour < eh):
+                    continue
+
+                h1_sub = h1_ema[h1_ema.index <= cur_t]
+                if len(h1_sub) == 0:
+                    continue
+                h1_bull = df_h1.loc[df_h1.index <= cur_t, "close"].iloc[-1] > h1_sub.iloc[-1]
+
+                b0 = sub_m5.iloc[i-2]
+                b1 = sub_m5.iloc[i-1]
+                b2 = sub_m5.iloc[i]
+
+                # Bullish ISDE Setup
+                if h1_bull and b2["low"] > b0["high"]:
+                    gap = (b2["low"] - b0["high"]) / pt_div
+                    if gap >= min_gap_pts:
+                        entry = float(b2["low"])
+                        sl = float(b1["low"]) - (1.5 * point)
+                        sl_dist = abs(entry - sl)
+                        if sl_dist > 0:
+                            rr = getattr(config, "ISDE_TARGET_RR", 2.0)
+                            tp = entry + (rr * sl_dist)
+                            rd = self.risk.evaluate(symbol, 1, entry, sl, tp)
+                            if rd.ok:
+                                sig = ScanSignal(
+                                    symbol=symbol,
+                                    direction=1,
+                                    entry_tf="M5",
+                                    bias_htf=bias_htf,
+                                    ts=cur_t,
+                                    entry=entry,
+                                    stop=sl,
+                                    take_profit=tp,
+                                    rr=round(rr, 2),
+                                    reason=f"ISDE M5 FVG ({sh:02d}-{eh:02d} UTC Precision Delivery)",
+                                    profile="balanced",
+                                    bias=1,
+                                    lots=rd.lots,
+                                    risk_usd=rd.risk_usd,
+                                    risk_pct=round(self.risk.risk_pct, 2),
+                                    confidence=90,
+                                    confidence_label="VERY HIGH",
+                                    strategy_type="isde_session",
+                                    strategy_badge="🎯 ISDE Session Delivery",
+                                    ltf_confirmed=True,
+                                    ltf_tf="M5"
+                                )
+                                out.append(sig)
+
+                # Bearish ISDE Setup
+                elif (not h1_bull) and b0["low"] > b2["high"]:
+                    gap = (b0["low"] - b2["high"]) / pt_div
+                    if gap >= min_gap_pts:
+                        entry = float(b2["high"])
+                        sl = float(b1["high"]) + (1.5 * point)
+                        sl_dist = abs(entry - sl)
+                        if sl_dist > 0:
+                            rr = getattr(config, "ISDE_TARGET_RR", 2.0)
+                            tp = entry - (rr * sl_dist)
+                            rd = self.risk.evaluate(symbol, -1, entry, sl, tp)
+                            if rd.ok:
+                                sig = ScanSignal(
+                                    symbol=symbol,
+                                    direction=-1,
+                                    entry_tf="M5",
+                                    bias_htf=bias_htf,
+                                    ts=cur_t,
+                                    entry=entry,
+                                    stop=sl,
+                                    take_profit=tp,
+                                    rr=round(rr, 2),
+                                    reason=f"ISDE M5 FVG ({sh:02d}-{eh:02d} UTC Precision Delivery)",
+                                    profile="balanced",
+                                    bias=-1,
+                                    lots=rd.lots,
+                                    risk_usd=rd.risk_usd,
+                                    risk_pct=round(self.risk.risk_pct, 2),
+                                    confidence=90,
+                                    confidence_label="VERY HIGH",
+                                    strategy_type="isde_session",
+                                    strategy_badge="🎯 ISDE Session Delivery",
+                                    ltf_confirmed=True,
+                                    ltf_tf="M5"
+                                )
+                                out.append(sig)
+
+            return out
+        except Exception as e:
+            log.warning("scan_isde_signals failed for %s: %s", symbol, e)
+            return []
 
     def current_bias(self, symbol: str, entry_tf: str | None = None,
                      bias_htf: str | None = None) -> str:
