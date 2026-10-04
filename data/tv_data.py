@@ -23,7 +23,9 @@ _INTERVAL = {
     "M30": Interval.MIN_30,
     "H1": Interval.HOUR_1,
     "H2": Interval.HOUR_2,
+    "H4": Interval.HOUR_4,
 }
+
 
 
 def _cache_path(symbol: str, tf: str) -> Path:

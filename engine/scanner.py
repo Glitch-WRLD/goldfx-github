@@ -144,7 +144,52 @@ def is_dxy_aligned(symbol: str, direction: int, dxy_trend: int, exempt_symbols: 
     return True, "UNKNOWN_SYMBOL"
 
 
+def check_htf_alignment(symbol: str, direction: int, as_of_ts: pd.Timestamp | None = None) -> tuple[bool, str]:
+    """Phase 1 Rule 1: Check if trade direction is counter to BOTH H1 and H4 50 EMAs.
+    Returns (True, "ALIGNED") if pro-trend on at least one timeframe or if data unavailable.
+    Returns (False, reason) if fighting both H1 and H4 simultaneously (10.6% historical WR).
+    """
+    if not getattr(config, "HTF_FILTER_ENABLED", True):
+        return True, "FILTER_DISABLED"
+
+    try:
+        df_h1 = get_df(symbol, "H1", refresh=False)
+        df_h4 = get_df(symbol, "H4", refresh=False)
+        if df_h1 is None or len(df_h1) < 50 or df_h4 is None or len(df_h4) < 50:
+            return True, "INSUFFICIENT_HTF_DATA"
+
+        if as_of_ts is not None:
+            df_h1 = df_h1.loc[df_h1.index <= as_of_ts]
+            df_h4 = df_h4.loc[df_h4.index <= as_of_ts]
+            if len(df_h1) < 50 or len(df_h4) < 50:
+                return True, "INSUFFICIENT_HIST_DATA"
+
+        ema_len = getattr(config, "HTF_FILTER_EMA_LEN", 50)
+        h1_ema = df_h1["close"].ewm(span=ema_len).mean().iloc[-1]
+        h4_ema = df_h4["close"].ewm(span=ema_len).mean().iloc[-1]
+        h1_close = df_h1["close"].iloc[-1]
+        h4_close = df_h4["close"].iloc[-1]
+
+        h1_bull = h1_close > h1_ema
+        h4_bull = h4_close > h4_ema
+
+        # If direction is BUY (+1):
+        if direction == 1:
+            if (not h1_bull) and (not h4_bull):
+                return False, f"BUY opposes both H1 ({h1_close:.5f} < {h1_ema:.5f}) and H4 ({h4_close:.5f} < {h4_ema:.5f})"
+        # If direction is SELL (-1):
+        elif direction == -1:
+            if h1_bull and h4_bull:
+                return False, f"SELL opposes both H1 ({h1_close:.5f} > {h1_ema:.5f}) and H4 ({h4_close:.5f} > {h4_ema:.5f})"
+
+        return True, "HTF_ALIGNED"
+    except Exception as e:
+        log.warning("check_htf_alignment failed for %s: %s", symbol, e)
+        return True, "ERROR_FALLBACK"
+
+
 @dataclass
+
 class ScanSignal:
     symbol: str
     direction: int               # +1 long / -1 short
@@ -311,6 +356,29 @@ class FVGScanner:
                     return None
             except Exception:
                 pass
+
+        # Phase 1 Rule 1: Higher Timeframe (HTF) Dual-Trend Guard (Prunes 10.6% WR counter-trend setups)
+        if getattr(config, "HTF_FILTER_ENABLED", True):
+            htf_ok, htf_reason = check_htf_alignment(symbol, side, as_of_ts=sig.ts)
+            if not htf_ok:
+                log.info("HTF_FILTER_SKIP: %s %s at %s dropped (%s). Win rate protected.",
+                         symbol, "LONG" if side == 1 else "SHORT", sig.ts, htf_reason)
+                return None
+
+        # Phase 1 Rule 2: Late NY / Rollover Session Exhaustion Check (17:00 - 24:00 UTC)
+        # Asian session (00:00 - 06:50 UTC) and London/NY overlap remain 100% active!
+        if getattr(config, "SESSION_EVENING_FILTER_ENABLED", True):
+            try:
+                ts_time = sig.ts.tz_convert("UTC").time() if hasattr(sig.ts, "tz_convert") else sig.ts.time()
+                sh = getattr(config, "SESSION_EVENING_START_UTC", 17)
+                eh = getattr(config, "SESSION_EVENING_END_UTC", 24)
+                if sh <= ts_time.hour < eh:
+                    log.info("EVENING_EXHAUSTION_SKIP: %s setup at %s dropped (Late NY/Rollover exhaustion window %d:00-24:00 UTC).",
+                             symbol, sig.ts, sh)
+                    return None
+            except Exception:
+                pass
+
 
         rd = self.risk.evaluate(symbol, side, entry, sl, tp, now_utc_day=None,
                                 realized_wr=None)

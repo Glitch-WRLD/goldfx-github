@@ -186,3 +186,21 @@ LONDON_OPEN_BUFFER_ENABLED  = os.getenv("LONDON_OPEN_BUFFER_ENABLED", "1") == "1
 LONDON_OPEN_START_UTC       = os.getenv("LONDON_OPEN_START_UTC", "06:50")         # 10 mins before 07:00 London open
 LONDON_OPEN_END_UTC         = os.getenv("LONDON_OPEN_END_UTC", "07:20")           # 20 mins after London open (clears Asian range purge)
 LONDON_OPEN_SYMBOLS         = {"XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "USDCAD", "AUDUSD", "NZDUSD", "USDCHF", "GBPAUD"}
+
+# ---- Phase 1: Institutional Defense & Signal Quality ----
+# Rule 1: Higher Timeframe (HTF) Dual-Trend Alignment (Prunes 10.6% WR counter-trend setups)
+HTF_FILTER_ENABLED          = os.getenv("HTF_FILTER_ENABLED", "1") == "1"         # 1 = Filter setups fighting both H1 and H4 50 EMAs
+HTF_FILTER_EMA_LEN          = int(os.getenv("HTF_FILTER_EMA_LEN", "50"))          # EMA 50 trend baseline
+# Rule 2: Late NY / Rollover Session Exhaustion Guard (Prunes 36.2% WR evening drag, 17:00 - 24:00 UTC)
+# Asian Session (00:00 - 06:50 UTC) and London/NY Overlap remain 100% ACTIVE!
+SESSION_EVENING_FILTER_ENABLED = os.getenv("SESSION_EVENING_FILTER_ENABLED", "1") == "1" # 1 = Pause brand new fills after 17:00 UTC
+SESSION_EVENING_START_UTC      = int(os.getenv("SESSION_EVENING_START_UTC", "17")) # 17:00 UTC (European close / late US chop)
+SESSION_EVENING_END_UTC        = int(os.getenv("SESSION_EVENING_END_UTC", "24"))   # 24:00 UTC
+
+# ---- Phase 2: Turtle Soup / Inducement Sweep Re-Entry Engine ----
+# Automatically detects when pro-trend setups are stopped by shallow liquidity sweeps (<= 0.6R)
+# and triggers an instant high-RR re-entry when price rejects back into market structure!
+TURTLE_SOUP_REENTRY_ENABLED = os.getenv("TURTLE_SOUP_REENTRY_ENABLED", "1") == "1" # 1 = Enable Turtle Soup re-entries
+TURTLE_SOUP_MAX_OVERSHOOT_R = float(os.getenv("TURTLE_SOUP_MAX_OVERSHOOT_R", "0.6")) # Max sweep overshoot (0.6R) beyond SL
+TURTLE_SOUP_MAX_WINDOW_MIN  = int(os.getenv("TURTLE_SOUP_MAX_WINDOW_MIN", "45"))    # Active monitoring window (45 mins)
+TURTLE_SOUP_SL_BUFFER_PIPS  = float(os.getenv("TURTLE_SOUP_SL_BUFFER_PIPS", "1.5")) # Pips behind sweep wick for tight stop

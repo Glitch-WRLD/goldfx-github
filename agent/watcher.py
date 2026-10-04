@@ -81,6 +81,25 @@ def _save_pending_retrace(pending: dict) -> None:
         log.warning("pending retrace save failed: %s", e)
 
 
+PENDING_TURTLE_SOUP_PATH = Path(__file__).resolve().parents[1] / "data" / "pending_turtle_soup.json"
+
+
+def _load_pending_turtle_soup() -> dict:
+    try:
+        return json.loads(PENDING_TURTLE_SOUP_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _save_pending_turtle_soup(pending: dict) -> None:
+    try:
+        PENDING_TURTLE_SOUP_PATH.parent.mkdir(exist_ok=True)
+        PENDING_TURTLE_SOUP_PATH.write_text(json.dumps(pending, indent=2, ensure_ascii=False),
+                                            encoding="utf-8")
+    except Exception as e:
+        log.warning("pending turtle soup save failed: %s", e)
+
+
 def _load_pending() -> list[dict]:
     try:
         return json.loads(PENDING_PATH.read_text(encoding="utf-8"))
@@ -321,6 +340,33 @@ def _is_london_open_cooldown(symbol: str) -> bool:
         return dt.time(sh, sm) <= now_utc <= dt.time(eh, em)
     except Exception:
         return False
+
+
+def _is_evening_exhaustion_window() -> bool:
+    """True if current time is between 17:00 and 24:00 UTC (Late NY / Rollover exhaustion window)."""
+    if not getattr(config, "SESSION_EVENING_FILTER_ENABLED", True):
+        return False
+    now_utc = dt.datetime.now(dt.timezone.utc)
+    sh = getattr(config, "SESSION_EVENING_START_UTC", 17)
+    eh = getattr(config, "SESSION_EVENING_END_UTC", 24)
+    return sh <= now_utc.hour < eh
+
+
+def _is_htf_counter_trend(symbol: str, direction: int) -> tuple[bool, str]:
+    """Phase 1 Rule 1: Check if trade direction is counter to BOTH H1 and H4 50 EMAs.
+    Returns (True, reason) if fighting both H1 and H4 (10.6% historical WR).
+    Returns (False, "OK") if aligned with at least one timeframe or if data unavailable.
+    """
+    if not getattr(config, "HTF_FILTER_ENABLED", True):
+        return False, "FILTER_DISABLED"
+
+    try:
+        from engine.scanner import check_htf_alignment
+        ok, reason = check_htf_alignment(symbol, direction)
+        return not ok, reason
+    except Exception as e:
+        log.warning("_is_htf_counter_trend check error for %s: %s", symbol, e)
+        return False, "ERROR_FALLBACK"
 
 
 def handle_prenew_guards(ledger, ex) -> int:
@@ -619,6 +665,38 @@ def manage_open_positions(ledger) -> int:
                             classification = "bad_entry"
                         else:
                             classification = "breach"
+
+                        # Phase 2: Enqueue stopped-out trade for Turtle Soup / Inducement Sweep Re-Entry
+                        if getattr(config, "TURTLE_SOUP_REENTRY_ENABLED", True) and not str(ref).startswith("soup_"):
+                            try:
+                                pending_soup = _load_pending_turtle_soup()
+                                ref_str = str(ref)
+                                if ref_str not in pending_soup:
+                                    fill_price_val = float(pos.get("fill_price", 0.0))
+                                    sl_price_val = float(pos.get("sl", 0.0))
+                                    tp_price_val = float(pos.get("tp", 0.0))
+                                    sl_dist_val = abs(fill_price_val - sl_price_val)
+                                    direction_val = int(pos.get("direction", 1))
+                                    if sl_dist_val > 0 and tp_price_val > 0:
+                                        pending_soup[ref_str] = {
+                                            "ref": ref,
+                                            "symbol": pos.get("symbol"),
+                                            "direction": direction_val,
+                                            "original_entry": fill_price_val,
+                                            "original_sl": sl_price_val,
+                                            "original_tp": tp_price_val,
+                                            "sl_dist": sl_dist_val,
+                                            "risk_usd": float(pos.get("risk_usd", 100.0)),
+                                            "exit_price": float(exit_price),
+                                            "sweep_extreme": float(exit_price),
+                                            "exit_ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+                                        }
+                                        _save_pending_turtle_soup(pending_soup)
+                                        log.info("TURTLE_SOUP_ENQUEUED: ref=%s symbol=%s dir=%d SL=%.5f exit=%.5f (monitoring for inducement sweep re-entry)",
+                                                 ref_str, pos.get("symbol"), direction_val, sl_price_val, exit_price)
+                            except Exception as e:
+                                log.warning("Failed to enqueue turtle soup for ref=%s: %s", ref, e)
+
 
                     log.info("RECONCILE_VERIFIED: ref=%s ticket=%s closed in MT5. hit=%s pnl=%.2f exit=%.5f class=%s",
                              ref, order_id, hit, pnl_raw, exit_price, classification)
@@ -1254,6 +1332,207 @@ def process_pending_retracements(ledger) -> int:
     return filled_count
 
 
+def process_pending_turtle_soup(ledger) -> int:
+    """Evaluate active pending Turtle Soup / Inducement Sweep setups (Phase 2).
+    - Checks invalidation: age > 45 mins -> expire
+    - Checks invalidation: overshoot > 0.6R -> expire (true trend breakdown, not a sweep)
+    - Checks invalidation: original TP reached before re-entry -> expire
+    - Checks trigger: price rejects and reclaims back inside original SL level
+    - Fires sniper market order with tight stop at sweep extreme + buffer
+    """
+    if not getattr(config, "TURTLE_SOUP_REENTRY_ENABLED", True):
+        return 0
+    pending = _load_pending_turtle_soup()
+    if not pending:
+        return 0
+
+    ex = get_executor()
+    rm = risk()
+    now_utc = dt.datetime.now(dt.timezone.utc)
+    still_pending = {}
+    reentered_count = 0
+
+    for ref_key, item in list(pending.items()):
+        symbol = item["symbol"]
+        direction = int(item["direction"])
+        orig_entry = float(item["original_entry"])
+        orig_sl = float(item["original_sl"])
+        orig_tp = float(item["original_tp"])
+        sl_dist = float(item["sl_dist"])
+        sweep_extreme = float(item.get("sweep_extreme", item["exit_price"]))
+
+        try:
+            exit_ts = dt.datetime.fromisoformat(item["exit_ts"])
+            age_min = (now_utc - exit_ts).total_seconds() / 60.0
+        except Exception:
+            age_min = 0.0
+
+        # 1. Invalidation: age > 45 mins
+        max_win = getattr(config, "TURTLE_SOUP_MAX_WINDOW_MIN", 45)
+        if age_min > max_win:
+            log.info("TURTLE_SOUP_EXPIRED: ref=%s %s age=%.1fm > %dm", ref_key, symbol, age_min, max_win)
+            continue
+
+        c_info = config.CONTRACTS.get(symbol, {})
+        point = c_info.get("point", 0.01 if symbol == "XAUUSD" or "JPY" in symbol else 0.00001)
+        pip_val = c_info.get("pip_value_per_lot_usd", 1.0)
+        fmt_digits = 2 if point >= 0.01 else 5
+
+        # Query live tick price
+        spread_pips, cur_price = ex.get_spread_pips(symbol)
+        if cur_price is None or cur_price <= 0:
+            still_pending[ref_key] = item
+            continue
+
+        max_overshoot_r = getattr(config, "TURTLE_SOUP_MAX_OVERSHOOT_R", 0.6)
+
+        # 2. Update sweep extreme & check overshoot
+        triggered = False
+        if direction == 1:  # BUY setup stopped below orig_sl
+            if cur_price < sweep_extreme:
+                sweep_extreme = cur_price
+                item["sweep_extreme"] = sweep_extreme
+            overshoot_r = (orig_sl - sweep_extreme) / sl_dist if sl_dist > 0 else 0
+            if overshoot_r > max_overshoot_r:
+                log.info("TURTLE_SOUP_INVALID_DEEP: ref=%s %s overshoot=%.2fR > %.2fR (true breakdown, not sweep)",
+                         ref_key, symbol, overshoot_r, max_overshoot_r)
+                continue
+            if cur_price >= orig_tp:
+                log.info("TURTLE_SOUP_MISSED_TP: ref=%s %s price touched original TP before re-entry", ref_key, symbol)
+                continue
+            # Trigger condition: Market price reclaims above original SL
+            if cur_price >= orig_sl:
+                triggered = True
+        else:  # SELL setup stopped above orig_sl
+            if cur_price > sweep_extreme:
+                sweep_extreme = cur_price
+                item["sweep_extreme"] = sweep_extreme
+            overshoot_r = (sweep_extreme - orig_sl) / sl_dist if sl_dist > 0 else 0
+            if overshoot_r > max_overshoot_r:
+                log.info("TURTLE_SOUP_INVALID_DEEP: ref=%s %s overshoot=%.2fR > %.2fR (true breakdown, not sweep)",
+                         ref_key, symbol, overshoot_r, max_overshoot_r)
+                continue
+            if cur_price <= orig_tp:
+                log.info("TURTLE_SOUP_MISSED_TP: ref=%s %s price touched original TP before re-entry", ref_key, symbol)
+                continue
+            # Trigger condition: Market price reclaims below original SL
+            if cur_price <= orig_sl:
+                triggered = True
+
+        if not triggered:
+            still_pending[ref_key] = item
+            continue
+
+        # 3. Triggered! Check portfolio capacity & risk limits
+        allowed, reason_cap = rm.can_open_trade(symbol)
+        if not allowed:
+            log.warning("TURTLE_SOUP_CAP_BLOCKED: ref=%s %s %s — holding in queue", ref_key, symbol, reason_cap)
+            still_pending[ref_key] = item
+            continue
+
+        soup_label = f"soup_{ref_key}"
+        if hasattr(ex, "has_position_with_ref") and ex.has_position_with_ref(symbol, soup_label):
+            log.info("TURTLE_SOUP_ALREADY_OPEN: ref=%s %s %s already active in MT5", ref_key, symbol, soup_label)
+            continue
+
+        # 4. Compute tight stop loss right behind the sweep wick
+        buf_pips = getattr(config, "TURTLE_SOUP_SL_BUFFER_PIPS", 1.5)
+        pip_scale = 0.01 if "JPY" in symbol or symbol == "XAUUSD" else (1.0 if any(idx in symbol for idx in ["100", "500", "30"]) else 0.0001)
+        buf_price = buf_pips * pip_scale
+
+        fill_entry = cur_price
+        if direction == 1:
+            candidate_sl = round(sweep_extreme - buf_price, fmt_digits)
+            candidate_tp = orig_tp
+        else:
+            candidate_sl = round(sweep_extreme + buf_price, fmt_digits)
+            candidate_tp = orig_tp
+
+        candidate_sl_dist = abs(fill_entry - candidate_sl)
+        if candidate_sl_dist <= 0:
+            still_pending[ref_key] = item
+            continue
+
+        target_dist = abs(candidate_tp - fill_entry)
+        target_rr = target_dist / candidate_sl_dist
+
+        # 5. Dynamic Lot Sizing based on portfolio risk budget (6%)
+        risk_usd = rm.balance * rm.risk_pct / 100.0
+        lots_raw = position_size(symbol, risk_usd, candidate_sl_dist)
+        lots = floor_lots(symbol, lots_raw)
+        min_lot = float(c_info.get("min_lot", 0.01))
+
+        if lots < min_lot:
+            lots = min_lot
+
+        dollar_risk = lots * (candidate_sl_dist / point) * pip_val
+
+        try:
+            fill = ex.place_market_order(symbol, direction, lots, fill_entry, candidate_sl, candidate_tp, soup_label)
+        except Exception as e:
+            log.error("Turtle soup order execution failed ref=%s: %s", ref_key, e)
+            still_pending[ref_key] = item
+            continue
+
+        if not fill.ok:
+            log.warning("Turtle soup order rejected ref=%s: %s", ref_key, fill.message[:200])
+            still_pending[ref_key] = item
+            continue
+
+        # Record in ledger
+        ledger.data[str(soup_label)] = {
+            "ref": soup_label,
+            "symbol": symbol,
+            "direction": direction,
+            "lots": lots,
+            "fill_price": fill.fill_price,
+            "sl": candidate_sl,
+            "orig_sl": orig_sl,
+            "tp": candidate_tp,
+            "rr": round(target_rr, 2),
+            "risk_usd": round(dollar_risk, 2),
+            "order_id": fill.order_id,
+            "broker": fill.broker,
+            "ts": fill.ts,
+            "signal_ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "status": "open",
+            "sl_state": "initial",
+            "peak_mfe_r": 0.0,
+            "profile": item.get("profile", ""),
+            "strategy_type": "turtle_soup_reentry",
+            "strategy_badge": "🐢 Turtle Soup Inducement Re-Entry",
+            "ltf_confirmed": True,
+        }
+        ledger.save()
+
+        # Format Telegram announcement
+        d_str = "LONG" if direction == 1 else "SHORT"
+        emoji = "🟢" if direction == 1 else "🔴"
+        overshoot_pips = (abs(sweep_extreme - orig_sl) / pip_scale)
+        msg = (
+            f"🐢 <b>TURTLE SOUP INDUCEMENT RE-ENTRY</b> {d_str} {emoji}\n"
+            f"{'─' * 28}\n"
+            f"<b>Asset:</b> {symbol}\n"
+            f"<b>Original Setup:</b> #{ref_key} (Liquidity Sweep Reclaimed)\n"
+            f"<b>Sweep Depth:</b> {overshoot_r:.2f}R ({overshoot_pips:.1f} pips)\n"
+            f"<b>Fill:</b> {fill.fill_price:.{fmt_digits}f} · {lots:.2f} lots\n"
+            f"<b>Tight SL:</b> {candidate_sl:.{fmt_digits}f} (Behind sweep wick)\n"
+            f"<b>Target TP:</b> {candidate_tp:.{fmt_digits}f} · <b>Target RR: 1:{target_rr:.2f}</b>\n"
+            f"<b>Ticket:</b> <code>{fill.order_id}</code>\n"
+            f"<b>Broker:</b> {fill.broker} · {fill.ts}\n"
+            f"{'─' * 28}\n"
+            f"🎯 Executed via GoldFX Institutional Liquidity Engine."
+        )
+        if CHAT_ID:
+            send(CHAT_ID, msg)
+        log.info("TURTLE_SOUP_FILLED ref=%s %s %s @ %.5f (SL %.5f, Risk $%.2f, RR 1:%.2f)",
+                 soup_label, symbol, d_str, fill.fill_price, candidate_sl, dollar_risk, target_rr)
+        reentered_count += 1
+
+    _save_pending_turtle_soup(still_pending)
+    return reentered_count
+
+
 def tick() -> bool:
     """One poll cycle: fetch state → fire new fills → manage open positions → reconcile outcomes.
     Returns True if any new fill was fired."""
@@ -1465,6 +1744,22 @@ def tick() -> bool:
                     ledger.record_outcome(ref_key, status="skipped", hit="dxy_counter_trend",
                                           pnl_usd=0.0, classification="dxy_momentum_filter")
                     continue
+
+        # Phase 1 Rule 2: Late NY / Rollover Session Exhaustion Check (17:00 - 24:00 UTC)
+        # Asian session (00:00 - 06:50 UTC) and London/NY overlap remain 100% active!
+        if _is_evening_exhaustion_window():
+            log.info("skip %s ref=%s — Late NY/Rollover exhaustion window active (17:00 - 24:00 UTC). New fills paused.",
+                     symbol, ref_key)
+            continue
+
+        # Phase 1 Rule 1: Higher Timeframe (HTF) Dual-Trend Guard (Prunes 10.6% WR counter-trend setups)
+        is_counter_htf, htf_reason = _is_htf_counter_trend(symbol, direction)
+        if is_counter_htf:
+            log.info("🛡️ HTF_FILTER_BLOCK %s ref=%s — opposes both H1 and H4 trends (%s). MT5 execution blocked.",
+                     symbol, ref_key, htf_reason)
+            ledger.record_outcome(ref_key, status="skipped", hit="htf_counter_trend",
+                                  pnl_usd=0.0, classification="htf_trend_filter")
+            continue
 
         try:
             ex = get_executor()
@@ -1778,6 +2073,12 @@ def tick() -> bool:
     managed = manage_open_positions(ledger)
     if managed:
         log.info("active exit management processed %d positions", managed)
+
+    # 3b. Process pending Turtle Soup sweeps (Phase 2 Inducement Re-entry)
+    soup_filled = process_pending_turtle_soup(ledger)
+    if soup_filled:
+        fired_any = True
+        log.info("processed pending turtle soup sweeps, fired %d re-entry orders", soup_filled)
 
     # 4. Reconcile outcomes (TP/SL) from the delivery bot
     reconciled = reconcile_outcomes(ledger, outcomes)
