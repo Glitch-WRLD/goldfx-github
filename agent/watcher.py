@@ -265,7 +265,7 @@ def _format_fill_message(fill: Fill, entry: dict) -> str:
     d = "LONG" if fill.direction == 1 else "SHORT"
     emoji = "\U0001F7E2" if fill.direction == 1 else "\U0001F534"
     ref = entry.get("ref")
-    ref_line = f"  \u00b7 setup #{int(ref):04d}" if ref is not None else ""
+    ref_line = f"  \u00b7 setup #{int(ref):04d}" if ref is not None and str(ref).isdigit() else (f"  \u00b7 setup #{ref}" if ref is not None else "")
     badge = entry.get("strategy_badge", "⚡ Momentum FVG")
     ltf_line = f"\n🎯 Concept: {badge}"
     if entry.get("ltf_confirmed"):
@@ -883,9 +883,10 @@ def manage_open_positions(ledger) -> int:
         digits = 5 if point < 0.01 else 2
         rr = float(pos.get("rr", 1.0))
 
+        trail_enabled = getattr(config, "TRAIL_ENABLED", False)
         if trail_mode == "PERCENTAGE":
-            is_stage3 = (pct_tp >= t2_pct or peak_pct_tp >= t2_pct)
-            is_stage2 = (pct_tp >= t1_pct or peak_pct_tp >= t1_pct)
+            is_stage3 = trail_enabled and (pct_tp >= t2_pct or peak_pct_tp >= t2_pct)
+            is_stage2 = trail_enabled and (pct_tp >= t1_pct or peak_pct_tp >= t1_pct)
             is_stage1 = (pct_tp >= be_pct or peak_pct_tp >= be_pct)
             trail_stage3_sl = round(fill_price + (t2_lock_pct * target_dist), digits) if direction == 1 else round(fill_price - (t2_lock_pct * target_dist), digits)
             trail_stage2_sl = round(fill_price + (t1_lock_pct * target_dist), digits) if direction == 1 else round(fill_price - (t1_lock_pct * target_dist), digits)
@@ -894,8 +895,8 @@ def manage_open_positions(ledger) -> int:
             s3_label = f"{t2_lock_pct * 100:.0f}% of target ({rr * t2_lock_pct:.2f}R)"
             s2_label = f"{t1_lock_pct * 100:.0f}% of target ({rr * t1_lock_pct:.2f}R)"
         else:
-            is_stage3 = (mfe_r >= trail2_threshold or peak_mfe >= trail2_threshold)
-            is_stage2 = (mfe_r >= trail1_threshold or peak_mfe >= trail1_threshold)
+            is_stage3 = trail_enabled and (mfe_r >= trail2_threshold or peak_mfe >= trail2_threshold)
+            is_stage2 = trail_enabled and (mfe_r >= trail1_threshold or peak_mfe >= trail1_threshold)
             is_stage1 = (mfe_r >= be_threshold or peak_mfe >= be_threshold)
             trail_stage3_sl = round(fill_price + (trail2_lock * risk), digits) if direction == 1 else round(fill_price - (trail2_lock * risk), digits)
             trail_stage2_sl = round(fill_price + (trail1_lock * risk), digits) if direction == 1 else round(fill_price - (trail1_lock * risk), digits)
@@ -1382,7 +1383,11 @@ def process_pending_turtle_soup(ledger) -> int:
         fmt_digits = 2 if point >= 0.01 else 5
 
         # Query live tick price
-        spread_pips, cur_price = ex.get_spread_pips(symbol)
+        if hasattr(ex, "get_spread_pips"):
+            spread_pips, cur_price = ex.get_spread_pips(symbol)
+        else:
+            cur_price = ex.current_price(symbol, direction=direction) if hasattr(ex, "current_price") else 0.0
+            spread_pips = 0.0
         if cur_price is None or cur_price <= 0:
             still_pending[ref_key] = item
             continue
@@ -1536,58 +1541,71 @@ def process_pending_turtle_soup(ledger) -> int:
     return reentered_count
 
 
-def tick() -> bool:
-    """One poll cycle: fetch state → fire new fills → manage open positions → reconcile outcomes.
-    Returns True if any new fill was fired."""
-    state = fetch_state()
-    if not state:
-        return False
-    # Drain any Telegram messages queued while the uplink was down —
-    # never silently eat a fill announcement again.
-    try:
-        drained = flush_pending()
-        if drained:
-            log.info("drained %d queued telegram message(s)", drained)
-    except Exception as e:
-        log.warning("flush_pending error: %s", e)
-    history = fetch_history(state)
-    outcomes = fetch_outcomes(state)
-    ledger = load_ledger()
-    rm = risk()
-    if getattr(config, "DYNAMIC_BALANCE", True):
+def _execute_setup_entry(
+    entry: dict,
+    ledger,
+    ex,
+    rm,
+    active_open_count: int,
+    at_risk_count: int,
+    open_positions: list[dict],
+    at_risk_positions: list[dict],
+    is_local_scan: bool = False,
+    outcomes: dict | None = None,
+) -> tuple[bool, int, int]:
+    """Execute a single setup entry (either local MT5 scan or remote state.json)
+    through the complete risk guard, session, news, spread, and sizing pipeline.
+    Returns (fired: bool, active_open_count: int, at_risk_count: int).
+    """
+    ref_key = _to_ref_key(entry)
+    if ledger.has(ref_key):
+        return False, active_open_count, at_risk_count
+
+    symbol = entry.get("symbol", "")
+    direction = _entry_dir(entry)
+    signal_ts = str(entry.get("ts", ""))
+
+    # Duplicate check: setup with identical symbol and signal_ts already in ledger
+    if signal_ts and any(pos.get("symbol") == symbol and str(pos.get("signal_ts")) == signal_ts for pos in ledger.data.values()):
+        log.debug("skip %s ref=%s — signal_ts %s already executed or recorded in ledger. Duplicate blocked.",
+                  symbol, ref_key, signal_ts)
+        return False, active_open_count, at_risk_count
+
+    # Broker-level duplicate execution defense
+    if hasattr(ex, "has_position_with_ref") and ex.has_position_with_ref(ref_key):
+        log.warning("skip %s ref=%s — broker already has an open position for this setup ref! Duplicate blocked.",
+                    symbol, ref_key)
+        return False, active_open_count, at_risk_count
+
+    # Remote GHA Stale Signal Guard: Reject setups older than MAX_SIGNAL_AGE_MIN (e.g. delayed GHA cron)
+    if not is_local_scan and signal_ts:
         try:
-            ex = get_executor()
-            if hasattr(ex, "account_snapshot"):
-                snap = ex.account_snapshot()
-                live_bal = float(snap.get("balance", 0.0))
-                if live_bal and live_bal > 0:
-                    rm.balance = live_bal
-        except Exception:
-            pass
+            sig_dt = dt.datetime.fromisoformat(signal_ts.replace("Z", "+00:00"))
+            now_utc = dt.datetime.now(dt.timezone.utc)
+            age_min = (now_utc - sig_dt).total_seconds() / 60.0
+            max_age_min = float(getattr(config, "MAX_SIGNAL_AGE_MIN", 15.0))
+            if age_min > max_age_min:
+                log.info("skip %s ref=%s — signal age %.1fm exceeds max allowed %.1fm (GHA cron delay). Entry aborted.",
+                         symbol, ref_key, age_min, max_age_min)
+                ledger.record_outcome(ref_key, status="skipped", hit="stale_signal_age",
+                                      pnl_usd=0.0, classification="stale_signal_delayed")
+                return False, active_open_count, at_risk_count
+        except Exception as te:
+            log.debug("signal_ts parse error for ref=%s: %s", ref_key, te)
 
-    # Execute Pre-Rollover Guards (Defense 2: Margin Stress-Test, Defense 3: Profit Lock)
-    try:
-        ex = get_executor()
-        handle_prerollover_guards(ledger, ex)
-    except Exception as e:
-        log.warning("handle_prerollover_guards error: %s", e)
+    # Check if the setup has already concluded in delivery bot outcomes
+    if outcomes:
+        outcome_key = f"{symbol}:{signal_ts}"
+        concluded = outcomes.get(str(ref_key)) or outcomes.get(outcome_key)
+        if concluded and concluded.get("hit") in ("tp", "sl"):
+            hit_type = concluded.get("hit")
+            log.info("skip %s ref=%s — already concluded in outcomes as %s before execution",
+                     symbol, ref_key, hit_type)
+            ledger.record_outcome(ref_key, status="skipped", hit=f"pre_entry_{hit_type}",
+                                  pnl_usd=0.0, classification=f"already_concluded_{hit_type}")
+            return False, active_open_count, at_risk_count
 
-    # High-Impact Red-Folder News Tactical Playbook Dispatcher (~30 mins before release)
-    try:
-        from engine.news import check_and_send_pre_news_alerts
-        check_and_send_pre_news_alerts(send, CHAT_ID, lookahead_min=getattr(config, "NEWS_PLAYBOOK_AHEAD_MIN", 30))
-    except Exception as e:
-        log.warning("check_and_send_pre_news_alerts error: %s", e)
-
-    # Pre-News Defense: Lock profits to Break-Even ahead of red-folder releases
-    try:
-        handle_prenew_guards(ledger, ex)
-    except Exception as e:
-        log.warning("handle_prenew_guards error: %s", e)
-
-    fired_any = False
-
-    # Defense 1: Portfolio Risk Budgeting & Capacity Guard (Dynamic by Real USD Account Size)
+    # Dynamic Portfolio Capacity calculation
     is_cent = getattr(config, "IS_CENT_ACCOUNT", False)
     if not is_cent and hasattr(ex, "account_snapshot"):
         try:
@@ -1611,6 +1629,629 @@ def tick() -> bool:
         max_trades_per_sym = getattr(config, "MAX_TRADES_PER_SYMBOL", 2)
         max_portfolio_risk_pct = getattr(config, "MAX_PORTFOLIO_RISK_PCT", 35.0 if is_cent else 30.0)
 
+    # Check 1: Max total open trades across all pairs & indices
+    if active_open_count >= max_trades:
+        log.info("skip %s ref=%s — max total concurrent trades reached (%d/%d active)",
+                 symbol, ref_key, active_open_count, max_trades)
+        return False, active_open_count, at_risk_count
+
+    # Check 1b: Max AT-RISK trades
+    if at_risk_count >= max_at_risk:
+        log.info("skip %s ref=%s — max at-risk trades reached (%d/%d unhedged risk, %d risk-free runners)",
+                 symbol, ref_key, at_risk_count, max_at_risk, active_open_count - at_risk_count)
+        return False, active_open_count, at_risk_count
+
+    # Check 2: Max concurrent trades on this specific symbol
+    sym_all_positions = [e for e in open_positions if e.get("symbol") == symbol]
+    sym_at_risk_positions = [
+        e for e in sym_all_positions
+        if e.get("sl_state") not in ("be", "trail_05", "trail_10")
+    ]
+    sym_open_count = len(sym_all_positions)
+    sym_at_risk_count = len(sym_at_risk_positions)
+    sym_be_count = sym_open_count - sym_at_risk_count
+
+    # Check 2a: Hard ceiling on single symbol
+    max_sym_total = getattr(config, "MAX_TOTAL_PER_SYMBOL", 3 if (is_cent or max_trades_per_sym >= 2) else 2)
+    if sym_open_count >= max_sym_total:
+        log.info("skip %s ref=%s — symbol total concentration ceiling reached (%d/%d on %s, %d risk-free at BE)",
+                 symbol, ref_key, sym_open_count, max_sym_total, symbol, sym_be_count)
+        return False, active_open_count, at_risk_count
+
+    # Check 2b: At-Risk ceiling on single symbol (< BE)
+    max_sym_at_risk = getattr(config, "MAX_AT_RISK_PER_SYMBOL", max_trades_per_sym)
+    if sym_at_risk_count >= max_sym_at_risk:
+        log.info("skip %s ref=%s — symbol at-risk limit reached (%d/%d at-risk on %s; existing %d trades must reach BE first)",
+                 symbol, ref_key, sym_at_risk_count, max_sym_at_risk, symbol, sym_at_risk_count)
+        return False, active_open_count, at_risk_count
+
+    # Check 3: Cumulative portfolio unprotected risk
+    unprotected_risk_usd = sum(
+        float(e.get("risk_usd", 0.0)) for e in at_risk_positions
+    )
+    current_unprotected_risk_pct = (unprotected_risk_usd / rm.balance * 100.0) if rm.balance > 0 else 0.0
+
+    # Dynamic Headroom sizing
+    remaining_risk_pct = max_portfolio_risk_pct - current_unprotected_risk_pct
+    if remaining_risk_pct < 2.5:
+        log.info("skip %s ref=%s — portfolio risk limit reached (open risk %.1f%% / max %.1f%%, headroom %.1f%% < 2.5%%)",
+                 symbol, ref_key, current_unprotected_risk_pct, max_portfolio_risk_pct, remaining_risk_pct)
+        return False, active_open_count, at_risk_count
+
+    trade_risk_pct = min(rm.risk_pct, remaining_risk_pct)
+
+    entry_price = float(entry.get("entry", 0))
+    sl = float(entry.get("sl", 0))
+    tp = float(entry.get("tp", 0))
+    rr = float(entry.get("rr", 0))
+    if not (symbol and entry_price and sl and tp and symbol in SYMBOL_RUNTIME):
+        return False, active_open_count, at_risk_count
+
+    # Rollover Blackout Check
+    if _is_rollover_blackout():
+        log.info("skip %s ref=%s — rollover blackout active (%s - %s UTC). New entries paused.",
+                 symbol, ref_key, getattr(config, "ROLLOVER_START_UTC", "20:55"), getattr(config, "ROLLOVER_END_UTC", "22:15"))
+        return False, active_open_count, at_risk_count
+
+    # US Open Opening Bell Cooldown Check
+    if _is_us_open_cooldown(symbol):
+        log.info("skip %s ref=%s — US Open opening bell volatility cooldown active (13:25 - 13:45 UTC). New entries paused.",
+                 symbol, ref_key)
+        return False, active_open_count, at_risk_count
+
+    # London Open Opening Bell Cooldown Check
+    if _is_london_open_cooldown(symbol):
+        log.info("skip %s ref=%s — London Open opening bell volatility cooldown active (06:50 - 07:20 UTC). Pausing entries during European cash open purge.",
+                 symbol, ref_key)
+        return False, active_open_count, at_risk_count
+
+    # High-Impact Red-Folder News Blackout
+    if getattr(config, "NEWS_BLACKOUT_ENABLED", True):
+        from engine.news import get_active_news_blackout
+        is_news_bo, bo_reason, _ = get_active_news_blackout(symbol)
+        if is_news_bo:
+            log.info("skip %s ref=%s — %s", symbol, ref_key, bo_reason)
+            return False, active_open_count, at_risk_count
+
+    # DXY Macro Momentum Defense (Forex Pairs Only)
+    if getattr(config, "DXY_FILTER_ENABLED", True):
+        exempt = getattr(config, "DXY_EXEMPT_SYMBOLS", {"XAUUSD", "NASDAQ-100", "US500", "DJ30", "GBPAUD"})
+        if symbol not in exempt:
+            from engine.scanner import get_dxy_trend, is_dxy_aligned
+            tf_dxy = getattr(config, "DXY_FILTER_TF", "M15")
+            ema_dxy = getattr(config, "DXY_FILTER_EMA", 21)
+            dxy_val, dxy_lbl = get_dxy_trend(tf=tf_dxy, ema_len=ema_dxy)
+            aligned, dxy_reason = is_dxy_aligned(symbol, direction, dxy_val)
+            if not aligned:
+                log.info("🛡️ DXY_FILTER_BLOCK %s ref=%s — live DXY opposes trade (%s, DXY %s). MT5 execution blocked.",
+                         symbol, ref_key, dxy_reason, dxy_lbl)
+                ledger.record_outcome(ref_key, status="skipped", hit="dxy_counter_trend",
+                                      pnl_usd=0.0, classification="dxy_momentum_filter")
+                return False, active_open_count, at_risk_count
+
+    # Late NY / Rollover Session Exhaustion Check
+    if _is_evening_exhaustion_window():
+        log.info("skip %s ref=%s — Late NY/Rollover exhaustion window active (17:00 - 24:00 UTC). New fills paused.",
+                 symbol, ref_key)
+        return False, active_open_count, at_risk_count
+
+    # Phase 1 Rule 1: Higher Timeframe (HTF) Dual-Trend Guard
+    is_counter_htf, htf_reason = _is_htf_counter_trend(symbol, direction)
+    if is_counter_htf:
+        log.info("🛡️ HTF_FILTER_BLOCK %s ref=%s — opposes both H1 and H4 trends (%s). MT5 execution blocked.",
+                 symbol, ref_key, htf_reason)
+        ledger.record_outcome(ref_key, status="skipped", hit="htf_counter_trend",
+                              pnl_usd=0.0, classification="htf_trend_filter")
+        return False, active_open_count, at_risk_count
+
+    # Spread Filter Check
+    if hasattr(ex, "get_spread"):
+        spread_val = ex.get_spread(symbol)
+        c_info = config.CONTRACTS.get(symbol, {})
+        digits = c_info.get("digits", 5)
+        pip_size = 0.0001 if digits in (4, 5) else (0.01 if digits in (2, 3) else c_info.get("point", 0.00001))
+
+        is_index = symbol in getattr(config, "INDEX_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"})
+        if symbol == "XAUUSD":
+            curr_metric = spread_val
+            max_spread = config.MAX_SPREAD_GOLD
+            metric_unit = "$"
+        elif is_index:
+            curr_metric = spread_val
+            max_spread = getattr(config, "MAX_SPREAD_INDEX", 8.0)
+            metric_unit = "pts"
+        else:
+            curr_metric = spread_val / pip_size if pip_size > 0 else 0.0
+            max_spread = config.MAX_SPREAD_PIPS
+            metric_unit = "pips"
+
+        if curr_metric > max_spread:
+            log.info("skip %s ref=%s — spread too wide (%.2f %s > max %.2f %s). Awaiting normal liquidity.",
+                     symbol, ref_key, curr_metric, metric_unit, max_spread, metric_unit)
+            return False, active_open_count, at_risk_count
+
+    # Fetch LIVE price first for pre-entry sanity and accurate dynamic sizing
+    try:
+        cur = ex.current_price(symbol, direction=direction) if hasattr(ex, "current_price") else 0.0
+    except Exception:
+        cur = 0.0
+    if not cur or cur <= 0:
+        cur = entry_price
+
+    # Check A: Never fire a setup whose SL is already breached
+    if (direction == 1 and cur <= sl) or (direction == -1 and cur >= sl):
+        log.info("skip %s ref=%s — SL already breached (cur %.5f, sl %.5f)",
+                 symbol, ref_key, cur, sl)
+        ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_sl_breached",
+                              pnl_usd=0.0, classification="sl_already_breached")
+        msg = (
+            f"🛑 {symbol} — SETUP #{ref_key} SKIPPED (SL BREACHED)\n"
+            f"{'─' * 26}\n"
+            f"Market price touched or breached SL ({sl:.5f}) before fill.\n"
+            f"Current Price: {cur:.5f}\n"
+            f"Execution safely aborted."
+        )
+        if CHAT_ID:
+            send(CHAT_ID, msg)
+        return False, active_open_count, at_risk_count
+
+    # Check B: Never fire if price already reached TP
+    if (direction == 1 and cur >= tp) or (direction == -1 and cur <= tp):
+        log.info("skip %s ref=%s — TP already reached (cur %.5f, tp %.5f)",
+                 symbol, ref_key, cur, tp)
+        ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_tp_reached",
+                              pnl_usd=0.0, classification="tp_already_reached")
+        msg = (
+            f"🎯 {symbol} — SETUP #{ref_key} SKIPPED (TARGET REACHED)\n"
+            f"{'─' * 26}\n"
+            f"Price reached Take Profit ({tp:.5f}) before fill could occur.\n"
+            f"Current Price: {cur:.5f}\n"
+            f"Anti-Chase: Finished moves are never chased."
+        )
+        if CHAT_ID:
+            send(CHAT_ID, msg)
+        return False, active_open_count, at_risk_count
+
+    orig_sl_dist = abs(entry_price - sl)
+    orig_tp_dist = abs(tp - entry_price)
+
+    # Remote GHA Slippage Guard: Reject entries if price drifted too far from delivered entry
+    if not is_local_scan:
+        slippage = abs(cur - entry_price)
+        is_index_sym = symbol in getattr(config, "INDEX_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"})
+        if symbol == "XAUUSD":
+            max_slip = float(getattr(config, "MAX_ENTRY_SLIPPAGE_GOLD", 0.80))
+            is_too_slipped = slippage > max_slip
+            slip_str = f"${slippage:.2f} > max ${max_slip:.2f}"
+        elif is_index_sym:
+            max_slip = float(getattr(config, "MAX_ENTRY_SLIPPAGE_INDEX", 15.0))
+            is_too_slipped = slippage > max_slip
+            slip_str = f"{slippage:.1f} pts > max {max_slip:.1f} pts"
+        else:
+            c_info = config.CONTRACTS.get(symbol, {})
+            digits = c_info.get("digits", 5)
+            pip_size = 0.0001 if digits in (4, 5) else 0.01
+            slip_pips = slippage / pip_size if pip_size > 0 else 0.0
+            max_slip_pips = float(getattr(config, "MAX_ENTRY_SLIPPAGE_PIPS", 4.0))
+            is_too_slipped = slip_pips > max_slip_pips
+            slip_str = f"{slip_pips:.1f} pips > max {max_slip_pips:.1f} pips"
+
+        is_chasing = (direction == 1 and cur > entry_price) or (direction == -1 and cur < entry_price)
+        if is_chasing and is_too_slipped:
+            log.info("skip %s ref=%s — entry slippage too high (%s). Execution aborted.",
+                     symbol, ref_key, slip_str)
+            ledger.record_outcome(ref_key, status="skipped", hit="entry_slippage_exceeded",
+                                  pnl_usd=0.0, classification="entry_slippage_chased")
+            return False, active_open_count, at_risk_count
+
+    # Check C: Adverse drift check (price fell too far towards SL)
+    max_adverse_pct = float(getattr(config, "MAX_ADVERSE_DRIFT_PCT", 0.50))
+    is_index_sym = symbol in getattr(config, "INDEX_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"})
+    min_noise_buffer = 0.50 if symbol == "XAUUSD" else (15.0 if is_index_sym else 0.00040)
+    adverse_dist = (entry_price - cur) if direction == 1 else (cur - entry_price)
+    if adverse_dist > (max_adverse_pct * orig_sl_dist) and adverse_dist > min_noise_buffer:
+        log.info("skip %s ref=%s — price drifted too far adverse from entry zone (cur %.5f, entry %.5f, adverse %.5f)",
+                 symbol, ref_key, cur, entry_price, adverse_dist)
+        ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_adverse_drift",
+                              pnl_usd=0.0, classification="adverse_drift_exceeded")
+        msg = (
+            f"⚠️ {symbol} — SETUP #{ref_key} SKIPPED (ADVERSE DRIFT)\n"
+            f"{'─' * 26}\n"
+            f"Price moved too close to Stop Loss before fill.\n"
+            f"Current: {cur:.5f} · Entry: {entry_price:.5f} · SL: {sl:.5f}\n"
+            f"Capital Guard: Entry blocked to avoid buying into adverse momentum."
+        )
+        if CHAT_ID:
+            send(CHAT_ID, msg)
+        return False, active_open_count, at_risk_count
+
+    # Check D: Anti-Chase Guard (price already ran >25% towards TP)
+    max_chase_pct = float(getattr(config, "MAX_CHASE_TP_PCT", 0.25))
+    if (direction == 1 and cur > entry_price + max_chase_pct * orig_tp_dist) or \
+       (direction == -1 and cur < entry_price - max_chase_pct * orig_tp_dist):
+        log.info("skip %s ref=%s — anti-chase guard: price already ran >%.0f%% towards TP (cur %.5f, entry %.5f, tp %.5f)",
+                 symbol, ref_key, max_chase_pct * 100, cur, entry_price, tp)
+        if getattr(config, "RETRACE_ENABLED", True):
+            pending_retrace = _load_pending_retrace()
+            if str(ref_key) not in pending_retrace:
+                tp_75 = entry_price + (tp - entry_price) * getattr(config, "RETRACE_INVAL_TP_PCT", 0.75)
+                pb_thresh = entry_price
+                pending_retrace[str(ref_key)] = {
+                    "ref": ref_key,
+                    "symbol": symbol,
+                    "direction": direction,
+                    "entry_delivered": entry_price,
+                    "sl_orig": sl,
+                    "tp": tp,
+                    "orig_risk": orig_sl_dist,
+                    "orig_rr": rr,
+                    "signal_ts": signal_ts,
+                    "first_seen_ts": time.time(),
+                    "tp_75": tp_75,
+                    "pullback_min_dist": pb_thresh,
+                    "had_pullback": False,
+                    "profile": entry.get("profile", ""),
+                    "label": f"goldfx #{ref_key}" if str(ref_key).isdigit() else f"goldfx {ref_key}",
+                }
+                _save_pending_retrace(pending_retrace)
+                d_str = "LONG" if direction == 1 else "SHORT"
+                digits_fmt = 2 if symbol == "XAUUSD" else config.CONTRACTS.get(symbol, {}).get("digits", 5)
+                msg = (
+                    f"🟡 {symbol} — PENDING M5 PULLBACK SNIPER {d_str}\n"
+                    f"{'─' * 26}\n"
+                    f"Setup #{ref_key} · {d_str} @ {cur:.{digits_fmt}f}\n"
+                    f"Price ran >{max_chase_pct*100:.0f}% towards TP ({cur:.{digits_fmt}f} vs {entry_price:.{digits_fmt}f}).\n"
+                    f"Anti-Chase active: Bot will wait for M5 pullback to entry zone ({entry_price:.{digits_fmt}f}) + M5 reversal structure to enter safely.\n"
+                    f"{'─' * 26}\n"
+                    f"🛡️ Capital preservation & entry optimization active."
+                )
+                if CHAT_ID:
+                    send(CHAT_ID, msg)
+                log.info("ENQUEUED_RETRACE %s ref=%s — price ran >%.0f%% towards TP; waiting for M5 pullback to entry zone %.5f",
+                         symbol, ref_key, max_chase_pct * 100, pb_thresh)
+        else:
+            ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_chase_avoided",
+                                  pnl_usd=0.0, classification="chase_avoided")
+        return False, active_open_count, at_risk_count
+
+    # Gold Quarantine & Small Account Capital Shield
+    is_cent_account = getattr(config, "IS_CENT_ACCOUNT", False)
+    if not is_cent_account and hasattr(ex, "account_snapshot"):
+        try:
+            snap = ex.account_snapshot()
+            acc_curr = str(snap.get("currency", "")).upper()
+            if "CENT" in acc_curr or "USC" in acc_curr:
+                is_cent_account = True
+        except Exception:
+            pass
+
+    if symbol == "XAUUSD" and not is_cent_account and getattr(config, "GOLD_QUARANTINE_ENABLED", True):
+        min_gold_abs = float(getattr(config, "MIN_GOLD_ABSOLUTE_BALANCE", 50.0))
+        min_gold_std = float(getattr(config, "MIN_GOLD_BALANCE", 100.0))
+
+        if rm.balance < min_gold_abs:
+            log.info("🛡️ QUARANTINE XAUUSD ref=%s — balance ($%.2f) below $%.2f minimum for Standard Gold. Forex pairs active.",
+                     ref_key, rm.balance, min_gold_abs)
+            ledger.record_outcome(ref_key, status="quarantined", hit="gold_quarantined_low_balance",
+                                  pnl_usd=0.0, classification="gold_small_account_quarantine")
+            msg = (
+                f"🛡️ XAUUSD — TRADE QUARANTINED (Small Account Protection)\n"
+                f"{'─' * 26}\n"
+                f"Setup #{ref_key} · Gold entry blocked\n"
+                f"Account Balance: ${rm.balance:.2f} (Below ${min_gold_abs:.0f} standard minimum)\n"
+                f"Reason: Standard Gold requires $8.60 margin on 0.01 lot.\n"
+                f"Preserving capital for safer Forex setups (EUR, GBP, AUD, CAD, NZD, CHF).\n"
+                f"💡 Tip: To trade Gold with ${rm.balance:.0f}, switch to a Headway Cent Account!\n"
+                f"{'─' * 26}"
+            )
+            if CHAT_ID:
+                send(CHAT_ID, msg)
+            return False, active_open_count, at_risk_count
+
+        if rm.balance < min_gold_std and not getattr(config, "RETRACE_ENABLED", False):
+            log.info("🛡️ QUARANTINE XAUUSD ref=%s — balance ($%.2f) < $%.2f and retrace sniper disabled. Standard market entry blocked.",
+                     ref_key, rm.balance, min_gold_std)
+            ledger.record_outcome(ref_key, status="quarantined", hit="gold_standard_entry_quarantined",
+                                  pnl_usd=0.0, classification="gold_requires_sniper")
+            return False, active_open_count, at_risk_count
+
+    # Dynamic Sizing based on ACTUAL LIVE MARKET PRICE (cur)
+    actual_sl_dist = abs(cur - sl)
+    actual_tp_dist = abs(tp - cur)
+    if actual_sl_dist <= 0:
+        return False, active_open_count, at_risk_count
+    actual_rr = actual_tp_dist / actual_sl_dist
+    if actual_rr < 0.60:
+        log.info("skip %s ref=%s — live RR %.2f too low from current market price (cur %.5f, sl %.5f, tp %.5f)",
+                 symbol, ref_key, actual_rr, cur, sl, tp)
+        return False, active_open_count, at_risk_count
+
+    risk_usd = rm.balance * trade_risk_pct / 100.0
+    lots_raw = position_size(symbol, risk_usd, actual_sl_dist)
+    lots = floor_lots(symbol, lots_raw)
+
+    if lots < 0.01:
+        c = config.CONTRACTS.get(symbol, {})
+        min_risk = 0.01 * (actual_sl_dist / c.get("point", 0.01)) * c.get("pip_value_per_lot_usd", 1.0)
+        if getattr(config, "RETRACE_ENABLED", True):
+            pending_retrace = _load_pending_retrace()
+            if str(ref_key) not in pending_retrace:
+                tp_75 = entry_price + (tp - entry_price) * getattr(config, "RETRACE_INVAL_TP_PCT", 0.75)
+                pb_thresh = entry_price - direction * (orig_sl_dist * getattr(config, "RETRACE_MIN_PULLBACK_PCT", 0.25))
+                pending_retrace[str(ref_key)] = {
+                    "ref": ref_key,
+                    "symbol": symbol,
+                    "direction": direction,
+                    "entry_delivered": entry_price,
+                    "sl_orig": sl,
+                    "tp": tp,
+                    "orig_risk": actual_sl_dist,
+                    "orig_rr": rr,
+                    "signal_ts": signal_ts,
+                    "first_seen_ts": time.time(),
+                    "tp_75": tp_75,
+                    "pullback_min_dist": pb_thresh,
+                    "had_pullback": False,
+                    "profile": entry.get("profile", ""),
+                    "label": f"goldfx #{ref_key}" if str(ref_key).isdigit() else f"goldfx {ref_key}",
+                }
+                _save_pending_retrace(pending_retrace)
+                log.info("ENQUEUED_RETRACE %s ref=%s — waiting for M5 pullback (live SL dist $%.2f > $%.2f risk budget)",
+                         symbol, ref_key, actual_sl_dist, risk_usd)
+                d_str = "LONG" if direction == 1 else "SHORT"
+                msg = (
+                    f"\U0001F7E1 {symbol} \u2014 PENDING M5 PULLBACK SNIPER\n"
+                    f"{'─' * 26}\n"
+                    f"Setup #{ref_key} · {d_str} @ {cur:.2f}\n"
+                    f"Live SL distance (${actual_sl_dist:.2f}) exceeds our ${risk_usd:.2f} risk budget ({trade_risk_pct:.1f}%).\n"
+                    f"Bot will wait for 25%–50% pullback + local M5 reversal structure to enter safely.\n"
+                    f"{'─' * 26}\n"
+                    f"⚠️ Capital preservation guard active."
+                )
+                if CHAT_ID:
+                    send(CHAT_ID, msg)
+            return False, active_open_count, at_risk_count
+        log.info("skip %s ref=%s — required lot (%.4f) < broker min (0.01). Min lot would risk $%.2f (%.1f%% of balance), exceeding our %.1f%% budget ($%.2f). Capital preserved.",
+                 symbol, ref_key, lots_raw, min_risk, (min_risk / rm.balance) * 100, trade_risk_pct, risk_usd)
+        return False, active_open_count, at_risk_count
+
+    label = f"goldfx #{ref_key}" if str(ref_key).isdigit() else f"goldfx {ref_key}"
+    try:
+        fill = ex.place_market_order(symbol, direction, lots, cur, sl, tp, label)
+    except Exception as e:
+        log.error("execution failed for ref=%s: %s", ref_key, e)
+        return False, active_open_count, at_risk_count
+
+    if not fill.ok:
+        log.warning("order rejected ref=%s: %s", ref_key, fill.message[:200])
+        return False, active_open_count, at_risk_count
+
+    # Record in ledger with full sizing and exit management context
+    ledger.data[str(ref_key)] = {
+        "ref": ref_key,
+        "symbol": symbol,
+        "direction": direction,
+        "lots": lots,
+        "fill_price": fill.fill_price,
+        "entry_delivered": entry_price,
+        "sl": sl,
+        "tp": tp,
+        "rr": round(actual_rr, 2),
+        "risk_usd": round(risk_usd, 2),
+        "order_id": fill.order_id,
+        "broker": fill.broker,
+        "ts": fill.ts,
+        "signal_ts": signal_ts,
+        "status": "open",
+        "sl_state": "initial",
+        "peak_mfe_r": 0.0,
+        "profile": entry.get("profile", ""),
+        "strategy_type": entry.get("strategy_type", "fvg_retest"),
+        "strategy_badge": entry.get("strategy_badge", "⚡ Momentum FVG"),
+        "ltf_confirmed": entry.get("ltf_confirmed", False),
+        "is_local_scan": is_local_scan,
+    }
+    ledger.save()
+
+    try:
+        pending_retrace = _load_pending_retrace()
+        if str(ref_key) in pending_retrace:
+            del pending_retrace[str(ref_key)]
+            _save_pending_retrace(pending_retrace)
+    except Exception:
+        pass
+
+    msg = _format_fill_message(fill, entry)
+    if CHAT_ID:
+        send(CHAT_ID, msg)
+    log.info("FILLED ref=%s %s %s @ %.5f %.2f lots (local_scan=%s)",
+             ref_key, symbol, "LONG" if direction == 1 else "SHORT",
+             fill.fill_price, lots, is_local_scan)
+
+    new_pos = ledger.data[str(ref_key)]
+    open_positions.append(new_pos)
+    at_risk_positions.append(new_pos)
+    return True, active_open_count + 1, at_risk_count + 1
+
+
+_local_fvg_scanner = None
+_last_scanned_bars: dict[str, str] = {}
+
+
+def scan_local_mt5_setups(
+    ledger,
+    ex,
+    rm,
+    active_open_count: int,
+    at_risk_count: int,
+    open_positions: list[dict],
+    at_risk_positions: list[dict],
+) -> tuple[int, int, int]:
+    """Native Local MT5 Fast Scanner (Proposal 1).
+    Scans live broker candle rates directly from MT5 memory at 0ms latency.
+    Runs on every newly closed candle for all symbols in SYMBOL_RUNTIME.
+    Fires confirmed setups instantly (1-2s after candle close).
+    Returns (fills_fired_count, updated_active_open_count, updated_at_risk_count).
+    """
+    if not getattr(config, "LOCAL_SCANNER_ENABLED", True):
+        return 0, active_open_count, at_risk_count
+
+    if not hasattr(ex, "broker") or ex.broker != "mt5":
+        return 0, active_open_count, at_risk_count
+
+    global _local_fvg_scanner, _last_scanned_bars
+    if _local_fvg_scanner is None:
+        from engine.scanner import FVGScanner
+        profile_name = getattr(config, "SCANNER_PROFILE", "balanced")
+        _local_fvg_scanner = FVGScanner(profile_name)
+
+    fired_count = 0
+    from data.tv_data import get_df
+
+    for symbol, rt in SYMBOL_RUNTIME.items():
+        entry_tf = rt["entry_tf"]
+        bias_htf = rt["bias_htf"]
+
+        try:
+            # get_df pulls 500 bars directly from MT5 memory in 50ms
+            df = get_df(symbol, entry_tf, refresh=True)
+            if df is None or len(df) < 50:
+                continue
+
+            # Latest closed bar timestamp (df.index[-2])
+            last_closed_ts = str(df.index[-2])
+            last_scanned = _last_scanned_bars.get(symbol)
+            if last_scanned == last_closed_ts:
+                # Candle has already been scanned; avoid re-running until next close
+                continue
+
+            # Mark this candle as scanned
+            _last_scanned_bars[symbol] = last_closed_ts
+
+            # Scan the latest closed bar (lookback=2 checks closed bars up to df.index[-2])
+            sigs = _local_fvg_scanner.scan_catchup(symbol, entry_tf, bias_htf, lookback=2)
+            if not sigs:
+                continue
+
+            for sig in sigs:
+                sig_ts_iso = sig.ts.isoformat()
+
+                # Deduplication check 1: Already in ledger?
+                if any(pos.get("symbol") == symbol and str(pos.get("signal_ts")) == sig_ts_iso for pos in ledger.data.values()):
+                    continue
+
+                # Deduplication check 2: Already in pending retracement?
+                pending_retrace = _load_pending_retrace()
+                if any(item.get("symbol") == symbol and str(item.get("signal_ts")) == sig_ts_iso for item in pending_retrace.values()):
+                    continue
+
+                # Compute next setup ref number
+                max_ledger_ref = max([int(k) for k in ledger.data.keys() if str(k).isdigit()] or [180])
+                state = fetch_state()
+                max_state_ref = int(state.get("ref_seq", 180)) if isinstance(state.get("ref_seq"), (int, str)) and str(state.get("ref_seq")).isdigit() else 180
+                next_ref = max(max_ledger_ref, max_state_ref) + 1
+
+                entry_dict = {
+                    "symbol": symbol,
+                    "dir": "LONG" if sig.direction == 1 else "SHORT",
+                    "entry": sig.entry,
+                    "sl": sig.stop,
+                    "tp": sig.take_profit,
+                    "rr": sig.rr,
+                    "ref": next_ref,
+                    "tf": sig.entry_tf,
+                    "ts": sig_ts_iso,
+                    "profile": getattr(sig, "profile", "balanced"),
+                    "strategy_type": getattr(sig, "strategy_type", "fvg_retest"),
+                    "strategy_badge": getattr(sig, "strategy_badge", "⚡ Momentum FVG"),
+                    "is_local_scan": True,
+                }
+
+                log.info("LOCAL_SCANNER_DETECT: %s %s @ %.5f (ref #%d, ts=%s, strat=%s)",
+                         symbol, entry_dict["dir"], sig.entry, next_ref, sig_ts_iso, entry_dict["strategy_type"])
+
+                fired, active_open_count, at_risk_count = _execute_setup_entry(
+                    entry_dict, ledger, ex, rm,
+                    active_open_count, at_risk_count,
+                    open_positions, at_risk_positions,
+                    is_local_scan=True,
+                    outcomes=None,
+                )
+
+                if fired:
+                    fired_count += 1
+                    # Update local state.json so it records the delivery locally
+                    try:
+                        local_state_file = Path(__file__).resolve().parents[1] / "gha_state" / "state.json"
+                        if local_state_file.exists():
+                            lstate = json.loads(local_state_file.read_text(encoding="utf-8"))
+                            lstate["ref_seq"] = next_ref
+                            hist = lstate.setdefault("history", [])
+                            hist.insert(0, entry_dict)
+                            deliv = set(lstate.setdefault("delivered", []))
+                            deliv.add(f"{symbol}:{sig_ts_iso}")
+                            lstate["delivered"] = sorted(deliv)
+                            local_state_file.write_text(json.dumps(lstate, indent=1), encoding="utf-8")
+                    except Exception as lse:
+                        log.debug("local state.json update failed: %s", lse)
+
+        except Exception as e:
+            log.warning("scan_local_mt5_setups error for %s: %s", symbol, e)
+
+    return fired_count, active_open_count, at_risk_count
+
+
+def tick() -> bool:
+    """One poll cycle: fetch state → local MT5 scan → fire fills → manage open positions → reconcile outcomes.
+    Returns True if any new fill was fired."""
+    state = fetch_state()
+    if not state:
+        return False
+    # Drain any Telegram messages queued while the uplink was down —
+    # never silently eat a fill announcement again.
+    try:
+        drained = flush_pending()
+        if drained:
+            log.info("drained %d queued telegram message(s)", drained)
+    except Exception as e:
+        log.warning("flush_pending error: %s", e)
+    history = fetch_history(state)
+    outcomes = fetch_outcomes(state)
+    ledger = load_ledger()
+    rm = risk()
+    ex = get_executor()
+
+    if getattr(config, "DYNAMIC_BALANCE", True):
+        try:
+            if hasattr(ex, "account_snapshot"):
+                snap = ex.account_snapshot()
+                live_bal = float(snap.get("balance", 0.0))
+                if live_bal and live_bal > 0:
+                    rm.balance = live_bal
+        except Exception:
+            pass
+
+    # Execute Pre-Rollover Guards (Defense 2: Margin Stress-Test, Defense 3: Profit Lock)
+    try:
+        handle_prerollover_guards(ledger, ex)
+    except Exception as e:
+        log.warning("handle_prerollover_guards error: %s", e)
+
+    # High-Impact Red-Folder News Tactical Playbook Dispatcher (~30 mins before release)
+    try:
+        from engine.news import check_and_send_pre_news_alerts
+        check_and_send_pre_news_alerts(send, CHAT_ID, lookahead_min=getattr(config, "NEWS_PLAYBOOK_AHEAD_MIN", 30))
+    except Exception as e:
+        log.warning("check_and_send_pre_news_alerts error: %s", e)
+
+    # Pre-News Defense: Lock profits to Break-Even ahead of red-folder releases
+    try:
+        handle_prenew_guards(ledger, ex)
+    except Exception as e:
+        log.warning("handle_prenew_guards error: %s", e)
+
+    fired_any = False
+
     target_broker = getattr(ex, "broker", "mt5")
     open_positions = [
         e for e in ledger.open_entries().values()
@@ -1624,453 +2265,30 @@ def tick() -> bool:
     ]
     at_risk_count = len(at_risk_positions)
 
-    # 1. Execute new setups (oldest first for correct sequence)
-    for entry in reversed(history):
-        ref_key = _to_ref_key(entry)
-        if ledger.has(ref_key):
-            continue
-
-        # Broker-level duplicate execution defense
-        if hasattr(ex, "has_position_with_ref") and ex.has_position_with_ref(ref_key):
-            log.warning("skip %s ref=%s — broker already has an open position for this setup ref! Duplicate blocked.",
-                        entry.get("symbol", ""), ref_key)
-            continue
-        symbol = entry.get("symbol", "")
-        direction = _entry_dir(entry)
-
-        # Check 1: Max total open trades across all pairs & indices (including runners)
-        if active_open_count >= max_trades:
-            log.info("skip %s ref=%s — max total concurrent trades reached (%d/%d active)",
-                     symbol, ref_key, active_open_count, max_trades)
-            continue
-
-        # Check 1b: Max AT-RISK trades (trades at BE or with trailing profit are risk-free and do not block fresh entries!)
-        if at_risk_count >= max_at_risk:
-            log.info("skip %s ref=%s — max at-risk trades reached (%d/%d unhedged risk, %d risk-free runners)",
-                     symbol, ref_key, at_risk_count, max_at_risk, active_open_count - at_risk_count)
-            continue
-
-        # Check 2: Max concurrent trades on this specific symbol (Option 3: Risk-Free Trades Exempt from At-Risk Cap)
-        sym_all_positions = [e for e in open_positions if e.get("symbol") == symbol]
-        sym_at_risk_positions = [
-            e for e in sym_all_positions
-            if e.get("sl_state") not in ("be", "trail_05", "trail_10")
-        ]
-        sym_open_count = len(sym_all_positions)
-        sym_at_risk_count = len(sym_at_risk_positions)
-        sym_be_count = sym_open_count - sym_at_risk_count
-
-        # Check 2a: Hard ceiling on single symbol (including risk-free runners at BE)
-        max_sym_total = getattr(config, "MAX_TOTAL_PER_SYMBOL", 3 if (is_cent or max_trades_per_sym >= 2) else 2)
-        if sym_open_count >= max_sym_total:
-            log.info("skip %s ref=%s — symbol total concentration ceiling reached (%d/%d on %s, %d risk-free at BE)",
-                     symbol, ref_key, sym_open_count, max_sym_total, symbol, sym_be_count)
-            continue
-
-        # Check 2b: At-Risk ceiling on single symbol (< BE)
-        max_sym_at_risk = getattr(config, "MAX_AT_RISK_PER_SYMBOL", max_trades_per_sym)
-        if sym_at_risk_count >= max_sym_at_risk:
-            log.info("skip %s ref=%s — symbol at-risk limit reached (%d/%d at-risk on %s; existing %d trades must reach BE first)",
-                     symbol, ref_key, sym_at_risk_count, max_sym_at_risk, symbol, sym_at_risk_count)
-            continue
-
-        # Check 3: Cumulative portfolio unprotected risk (trades at Breakeven or locked profit have $0 risk!)
-        unprotected_risk_usd = sum(
-            float(e.get("risk_usd", 0.0)) for e in at_risk_positions
+    # 0. Local MT5 Fast Scanner (Proposal 1: 0ms Execution Latency on candle close)
+    try:
+        local_fired, active_open_count, at_risk_count = scan_local_mt5_setups(
+            ledger, ex, rm,
+            active_open_count, at_risk_count,
+            open_positions, at_risk_positions
         )
-        current_unprotected_risk_pct = (unprotected_risk_usd / rm.balance * 100.0) if rm.balance > 0 else 0.0
-        
-        # High-Capacity Dynamic Headroom:
-        # Instead of skipping a valid trade when open risk is close to the cap,
-        # dynamically scale risk down to fit the remaining budget (minimum 2.5% risk).
-        remaining_risk_pct = max_portfolio_risk_pct - current_unprotected_risk_pct
-        if remaining_risk_pct < 2.5:
-            log.info("skip %s ref=%s — portfolio risk limit reached (open risk %.1f%% / max %.1f%%, headroom %.1f%% < 2.5%%)",
-                     symbol, ref_key, current_unprotected_risk_pct, max_portfolio_risk_pct, remaining_risk_pct)
-            continue
+        if local_fired > 0:
+            fired_any = True
+            log.info("LOCAL_SCANNER fired %d new setup(s) on candle close", local_fired)
+    except Exception as lse:
+        log.error("scan_local_mt5_setups error: %s", lse, exc_info=True)
 
-        trade_risk_pct = min(rm.risk_pct, remaining_risk_pct)
-
-        entry_price = float(entry.get("entry", 0))
-        sl = float(entry.get("sl", 0))
-        tp = float(entry.get("tp", 0))
-        rr = float(entry.get("rr", 0))
-        signal_ts = str(entry.get("ts", ""))
-        if not (symbol and entry_price and sl and tp):
-            continue
-        if symbol not in SYMBOL_RUNTIME:
-            continue
-        # Check if the setup has already concluded in delivery bot outcomes
-        outcome_key = f"{symbol}:{signal_ts}"
-        concluded = outcomes.get(str(ref_key)) or outcomes.get(outcome_key)
-        if concluded and concluded.get("hit") in ("tp", "sl"):
-            hit_type = concluded.get("hit")
-            log.info("skip %s ref=%s — already concluded in outcomes as %s before execution",
-                     symbol, ref_key, hit_type)
-            ledger.record_outcome(ref_key, status="skipped", hit=f"pre_entry_{hit_type}",
-                                  pnl_usd=0.0, classification=f"already_concluded_{hit_type}")
-            continue
-
-        # Rollover Blackout Check (e.g. 20:55 - 22:15 UTC)
-        if _is_rollover_blackout():
-            log.info("skip %s ref=%s — rollover blackout active (%s - %s UTC). New entries paused.",
-                     symbol, ref_key, getattr(config, "ROLLOVER_START_UTC", "20:55"), getattr(config, "ROLLOVER_END_UTC", "22:15"))
-            continue
-
-        # US Open Opening Bell Cooldown Check (13:25 - 13:45 UTC for NASDAQ-100, US500, DJ30)
-        if _is_us_open_cooldown(symbol):
-            log.info("skip %s ref=%s — US Open opening bell volatility cooldown active (13:25 - 13:45 UTC). New entries paused.",
-                     symbol, ref_key)
-            continue
-
-        # London Open Opening Bell Cooldown Check (06:50 - 07:20 UTC for Forex & Gold)
-        if _is_london_open_cooldown(symbol):
-            log.info("skip %s ref=%s — London Open opening bell volatility cooldown active (06:50 - 07:20 UTC). Pausing entries during European cash open purge.",
-                     symbol, ref_key)
-            continue
-
-        # High-Impact Red-Folder News Blackout (e.g. -15m to +15m around NFP, CPI, FOMC, etc.)
-        if getattr(config, "NEWS_BLACKOUT_ENABLED", True):
-            from engine.news import get_active_news_blackout
-            is_news_bo, bo_reason, _ = get_active_news_blackout(symbol)
-            if is_news_bo:
-                log.info("skip %s ref=%s — %s", symbol, ref_key, bo_reason)
-                continue
-
-        # DXY Macro Momentum Defense (Forex Pairs Only):
-        # Double-checks live US Dollar momentum before firing into MT5 broker.
-        # Exempts Gold and Equity Indices to preserve independent safe-haven / momentum runs.
-        if getattr(config, "DXY_FILTER_ENABLED", True):
-            exempt = getattr(config, "DXY_EXEMPT_SYMBOLS", {"XAUUSD", "NASDAQ-100", "US500", "DJ30", "GBPAUD"})
-            if symbol not in exempt:
-                from engine.scanner import get_dxy_trend, is_dxy_aligned
-                tf_dxy = getattr(config, "DXY_FILTER_TF", "M15")
-                ema_dxy = getattr(config, "DXY_FILTER_EMA", 21)
-                dxy_val, dxy_lbl = get_dxy_trend(tf=tf_dxy, ema_len=ema_dxy)
-                aligned, dxy_reason = is_dxy_aligned(symbol, direction, dxy_val)
-                if not aligned:
-                    log.info("🛡️ DXY_FILTER_BLOCK %s ref=%s — live DXY opposes trade (%s, DXY %s). MT5 execution blocked.",
-                             symbol, ref_key, dxy_reason, dxy_lbl)
-                    ledger.record_outcome(ref_key, status="skipped", hit="dxy_counter_trend",
-                                          pnl_usd=0.0, classification="dxy_momentum_filter")
-                    continue
-
-        # Phase 1 Rule 2: Late NY / Rollover Session Exhaustion Check (17:00 - 24:00 UTC)
-        # Asian session (00:00 - 06:50 UTC) and London/NY overlap remain 100% active!
-        if _is_evening_exhaustion_window():
-            log.info("skip %s ref=%s — Late NY/Rollover exhaustion window active (17:00 - 24:00 UTC). New fills paused.",
-                     symbol, ref_key)
-            continue
-
-        # Phase 1 Rule 1: Higher Timeframe (HTF) Dual-Trend Guard (Prunes 10.6% WR counter-trend setups)
-        is_counter_htf, htf_reason = _is_htf_counter_trend(symbol, direction)
-        if is_counter_htf:
-            log.info("🛡️ HTF_FILTER_BLOCK %s ref=%s — opposes both H1 and H4 trends (%s). MT5 execution blocked.",
-                     symbol, ref_key, htf_reason)
-            ledger.record_outcome(ref_key, status="skipped", hit="htf_counter_trend",
-                                  pnl_usd=0.0, classification="htf_trend_filter")
-            continue
-
-        try:
-            ex = get_executor()
-
-            # Spread Filter Check
-            if hasattr(ex, "get_spread"):
-                spread_val = ex.get_spread(symbol)
-                c_info = config.CONTRACTS.get(symbol, {})
-                digits = c_info.get("digits", 5)
-                pip_size = 0.0001 if digits in (4, 5) else (0.01 if digits in (2, 3) else c_info.get("point", 0.00001))
-
-                is_index = symbol in getattr(config, "INDEX_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"})
-                if symbol == "XAUUSD":
-                    curr_metric = spread_val
-                    max_spread = config.MAX_SPREAD_GOLD
-                    metric_unit = "$"
-                elif is_index:
-                    curr_metric = spread_val
-                    max_spread = getattr(config, "MAX_SPREAD_INDEX", 8.0)
-                    metric_unit = "pts"
-                else:
-                    curr_metric = spread_val / pip_size if pip_size > 0 else 0.0
-                    max_spread = config.MAX_SPREAD_PIPS
-                    metric_unit = "pips"
-
-                if curr_metric > max_spread:
-                    log.info("skip %s ref=%s — spread too wide (%.2f %s > max %.2f %s). Awaiting normal liquidity.",
-                             symbol, ref_key, curr_metric, metric_unit, max_spread, metric_unit)
-                    continue
-
-            # Fetch LIVE price first for pre-entry sanity and accurate dynamic sizing
-            cur = ex.current_price(symbol, direction=direction) if hasattr(ex, "current_price") else 0.0
-            if not cur or cur <= 0:
-                cur = entry_price
-
-            # Check A: Never fire a setup whose SL is already breached
-            if (direction == 1 and cur <= sl) or (direction == -1 and cur >= sl):
-                log.info("skip %s ref=%s — SL already breached (cur %.5f, sl %.5f)",
-                         symbol, ref_key, cur, sl)
-                ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_sl_breached",
-                                      pnl_usd=0.0, classification="sl_already_breached")
-                msg = (
-                    f"🛑 {symbol} — SETUP #{ref_key} SKIPPED (SL BREACHED)\n"
-                    f"{'─' * 26}\n"
-                    f"Market price touched or breached SL ({sl:.5f}) before fill.\n"
-                    f"Current Price: {cur:.5f}\n"
-                    f"Execution safely aborted."
-                )
-                if CHAT_ID:
-                    send(CHAT_ID, msg)
-                continue
-
-            # Check B: Never fire if price already reached TP
-            if (direction == 1 and cur >= tp) or (direction == -1 and cur <= tp):
-                log.info("skip %s ref=%s — TP already reached (cur %.5f, tp %.5f)",
-                         symbol, ref_key, cur, tp)
-                ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_tp_reached",
-                                      pnl_usd=0.0, classification="tp_already_reached")
-                msg = (
-                    f"🎯 {symbol} — SETUP #{ref_key} SKIPPED (TARGET REACHED)\n"
-                    f"{'─' * 26}\n"
-                    f"Price reached Take Profit ({tp:.5f}) before fill could occur.\n"
-                    f"Current Price: {cur:.5f}\n"
-                    f"Anti-Chase: Finished moves are never chased."
-                )
-                if CHAT_ID:
-                    send(CHAT_ID, msg)
-                continue
-
-            orig_sl_dist = abs(entry_price - sl)
-            orig_tp_dist = abs(tp - entry_price)
-
-            # Check C: Adverse drift check (price fell too far towards SL)
-            # Requires adverse drift to exceed 50% of SL AND exceed minimum noise floor (4 pips FX, $0.50 Gold, 15 pts Index)
-            max_adverse_pct = float(getattr(config, "MAX_ADVERSE_DRIFT_PCT", 0.50))
-            is_index_sym = symbol in getattr(config, "INDEX_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"})
-            min_noise_buffer = 0.50 if symbol == "XAUUSD" else (15.0 if is_index_sym else 0.00040)
-            adverse_dist = (entry_price - cur) if direction == 1 else (cur - entry_price)
-            if adverse_dist > (max_adverse_pct * orig_sl_dist) and adverse_dist > min_noise_buffer:
-                log.info("skip %s ref=%s — price drifted too far adverse from entry zone (cur %.5f, entry %.5f, adverse %.5f)",
-                         symbol, ref_key, cur, entry_price, adverse_dist)
-                ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_adverse_drift",
-                                      pnl_usd=0.0, classification="adverse_drift_exceeded")
-                msg = (
-                    f"⚠️ {symbol} — SETUP #{ref_key} SKIPPED (ADVERSE DRIFT)\n"
-                    f"{'─' * 26}\n"
-                    f"Price moved too close to Stop Loss before fill.\n"
-                    f"Current: {cur:.5f} · Entry: {entry_price:.5f} · SL: {sl:.5f}\n"
-                    f"Capital Guard: Entry blocked to avoid buying into adverse momentum."
-                )
-                if CHAT_ID:
-                    send(CHAT_ID, msg)
-                continue
-
-            # Check D: Anti-Chase Guard (price already ran >25% towards TP)
-            max_chase_pct = float(getattr(config, "MAX_CHASE_TP_PCT", 0.25))
-            if (direction == 1 and cur > entry_price + max_chase_pct * orig_tp_dist) or \
-               (direction == -1 and cur < entry_price - max_chase_pct * orig_tp_dist):
-                log.info("skip %s ref=%s — anti-chase guard: price already ran >%.0f%% towards TP (cur %.5f, entry %.5f, tp %.5f)",
-                         symbol, ref_key, max_chase_pct * 100, cur, entry_price, tp)
-                if getattr(config, "RETRACE_ENABLED", True):
-                    pending_retrace = _load_pending_retrace()
-                    if str(ref_key) not in pending_retrace:
-                        tp_75 = entry_price + (tp - entry_price) * getattr(config, "RETRACE_INVAL_TP_PCT", 0.75)
-                        pb_thresh = entry_price
-                        pending_retrace[str(ref_key)] = {
-                            "ref": ref_key,
-                            "symbol": symbol,
-                            "direction": direction,
-                            "entry_delivered": entry_price,
-                            "sl_orig": sl,
-                            "tp": tp,
-                            "orig_risk": orig_sl_dist,
-                            "orig_rr": rr,
-                            "signal_ts": signal_ts,
-                            "first_seen_ts": time.time(),
-                            "tp_75": tp_75,
-                            "pullback_min_dist": pb_thresh,
-                            "had_pullback": False,
-                            "profile": entry.get("profile", ""),
-                            "label": f"goldfx #{ref_key}" if str(ref_key).isdigit() else f"goldfx {ref_key}",
-                        }
-                        _save_pending_retrace(pending_retrace)
-                        d_str = "LONG" if direction == 1 else "SHORT"
-                        digits_fmt = 2 if symbol == "XAUUSD" else config.CONTRACTS.get(symbol, {}).get("digits", 5)
-                        msg = (
-                            f"🟡 {symbol} — PENDING M5 PULLBACK SNIPER {d_str}\n"
-                            f"{'─' * 26}\n"
-                            f"Setup #{ref_key} · {d_str} @ {cur:.{digits_fmt}f}\n"
-                            f"Price ran >{max_chase_pct*100:.0f}% towards TP ({cur:.{digits_fmt}f} vs {entry_price:.{digits_fmt}f}).\n"
-                            f"Anti-Chase active: Bot will wait for M5 pullback to entry zone ({entry_price:.{digits_fmt}f}) + M5 reversal structure to enter safely.\n"
-                            f"{'─' * 26}\n"
-                            f"🛡️ Capital preservation & entry optimization active."
-                        )
-                        if CHAT_ID:
-                            send(CHAT_ID, msg)
-                        log.info("ENQUEUED_RETRACE %s ref=%s — price ran >%.0f%% towards TP; waiting for M5 pullback to entry zone %.5f",
-                                 symbol, ref_key, max_chase_pct * 100, pb_thresh)
-                else:
-                    ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_chase_avoided",
-                                          pnl_usd=0.0, classification="chase_avoided")
-                continue
-
-            # ---- Gold Quarantine & Small Account Capital Shield ----
-            # Standard Gold requires $8.60 margin on 0.01 lot (1:500 leverage).
-            # On a Standard account under $50, this creates immediate stop-out risk on minor drawdowns.
-            # On Cent accounts (where balance is in cents e.g. 1000 USC = $10), Gold is fully permitted.
-            is_cent_account = getattr(config, "IS_CENT_ACCOUNT", False)
-            if not is_cent_account and hasattr(ex, "account_snapshot"):
-                try:
-                    snap = ex.account_snapshot()
-                    acc_curr = str(snap.get("currency", "")).upper()
-                    if "CENT" in acc_curr or "USC" in acc_curr:
-                        is_cent_account = True
-                except Exception:
-                    pass
-
-            if symbol == "XAUUSD" and not is_cent_account and getattr(config, "GOLD_QUARANTINE_ENABLED", True):
-                min_gold_abs = float(getattr(config, "MIN_GOLD_ABSOLUTE_BALANCE", 50.0))
-                min_gold_std = float(getattr(config, "MIN_GOLD_BALANCE", 100.0))
-
-                # Tier 1: Total Quarantine for Standard balances < $50
-                if rm.balance < min_gold_abs:
-                    log.info("🛡️ QUARANTINE XAUUSD ref=%s — balance ($%.2f) below $%.2f minimum for Standard Gold. Forex pairs active.",
-                             ref_key, rm.balance, min_gold_abs)
-                    ledger.record_outcome(ref_key, status="quarantined", hit="gold_quarantined_low_balance",
-                                          pnl_usd=0.0, classification="gold_small_account_quarantine")
-                    msg = (
-                        f"🛡️ XAUUSD — TRADE QUARANTINED (Small Account Protection)"
-                        f"\n{'─' * 26}"
-                        f"\nSetup #{ref_key} · Gold entry blocked"
-                        f"\nAccount Balance: ${rm.balance:.2f} (Below ${min_gold_abs:.0f} standard minimum)"
-                        f"\nReason: Standard Gold requires $8.60 margin on 0.01 lot."
-                        f"\nPreserving capital for safer Forex setups (EUR, GBP, AUD, CAD, NZD, CHF)."
-                        f"\n💡 Tip: To trade Gold with ${rm.balance:.0f}, switch to a Headway Cent Account!"
-                        f"\n{'─' * 26}"
-                    )
-                    if CHAT_ID:
-                        send(CHAT_ID, msg)
-                    continue
-
-                # Tier 2: Balances between $50 and $100 must use M5 Retrace Sniper only
-                if rm.balance < min_gold_std and not getattr(config, "RETRACE_ENABLED", False):
-                    log.info("🛡️ QUARANTINE XAUUSD ref=%s — balance ($%.2f) < $%.2f and retrace sniper disabled. Standard market entry blocked.",
-                             ref_key, rm.balance, min_gold_std)
-                    ledger.record_outcome(ref_key, status="quarantined", hit="gold_standard_entry_quarantined",
-                                          pnl_usd=0.0, classification="gold_requires_sniper")
-                    continue
-
-
-            # Dynamic Sizing based on ACTUAL LIVE MARKET PRICE (cur)
-            # This guarantees dollar risk NEVER exceeds the 6% budget!
-            actual_sl_dist = abs(cur - sl)
-            actual_tp_dist = abs(tp - cur)
-            if actual_sl_dist <= 0:
-                continue
-            actual_rr = actual_tp_dist / actual_sl_dist
-            if actual_rr < 0.60:
-                log.info("skip %s ref=%s — live RR %.2f too low from current market price (cur %.5f, sl %.5f, tp %.5f)",
-                         symbol, ref_key, actual_rr, cur, sl, tp)
-                continue
-
-            risk_usd = rm.balance * trade_risk_pct / 100.0
-            lots_raw = position_size(symbol, risk_usd, actual_sl_dist)
-            lots = floor_lots(symbol, lots_raw)
-
-            if lots < 0.01:
-                c = config.CONTRACTS.get(symbol, {})
-                min_risk = 0.01 * (actual_sl_dist / c.get("point", 0.01)) * c.get("pip_value_per_lot_usd", 1.0)
-                if getattr(config, "RETRACE_ENABLED", True):
-                    pending_retrace = _load_pending_retrace()
-                    if str(ref_key) not in pending_retrace:
-                        tp_75 = entry_price + (tp - entry_price) * getattr(config, "RETRACE_INVAL_TP_PCT", 0.75)
-                        pb_thresh = entry_price - direction * (orig_sl_dist * getattr(config, "RETRACE_MIN_PULLBACK_PCT", 0.25))
-                        pending_retrace[str(ref_key)] = {
-                            "ref": ref_key,
-                            "symbol": symbol,
-                            "direction": direction,
-                            "entry_delivered": entry_price,
-                            "sl_orig": sl,
-                            "tp": tp,
-                            "orig_risk": actual_sl_dist,
-                            "orig_rr": rr,
-                            "signal_ts": signal_ts,
-                            "first_seen_ts": time.time(),
-                            "tp_75": tp_75,
-                            "pullback_min_dist": pb_thresh,
-                            "had_pullback": False,
-                            "profile": entry.get("profile", ""),
-                            "label": f"goldfx #{ref_key}" if str(ref_key).isdigit() else f"goldfx {ref_key}",
-                        }
-                        _save_pending_retrace(pending_retrace)
-                        log.info("ENQUEUED_RETRACE %s ref=%s — waiting for M5 pullback (live SL dist $%.2f > $%.2f risk budget)",
-                                 symbol, ref_key, actual_sl_dist, risk_usd)
-                        d_str = "LONG" if direction == 1 else "SHORT"
-                        msg = (
-                            f"\U0001F7E1 {symbol} \u2014 PENDING M5 PULLBACK SNIPER"
-                            f"\n{'\u2500' * 26}"
-                            f"\nSetup #{ref_key} \u00b7 {d_str} @ {cur:.2f}"
-                            f"\nLive SL distance (${actual_sl_dist:.2f}) exceeds our ${risk_usd:.2f} risk budget ({trade_risk_pct:.1f}%)."
-                            f"\nBot will wait for 25%–50% pullback + local M5 reversal structure to enter safely."
-                            f"\n{'\u2500' * 26}"
-                            f"\n\u26A0\ufe0f Capital preservation guard active."
-                        )
-                        if CHAT_ID:
-                            send(CHAT_ID, msg)
-                    continue
-                log.info("skip %s ref=%s — required lot (%.4f) < broker min (0.01). Min lot would risk $%.2f (%.1f%% of balance), exceeding our %.1f%% budget ($%.2f). Capital preserved.",
-                         symbol, ref_key, lots_raw, min_risk, (min_risk / rm.balance) * 100, trade_risk_pct, risk_usd)
-                continue
-
-            label = f"goldfx #{ref_key}" if str(ref_key).isdigit() else f"goldfx {ref_key}"
-            fill = ex.place_market_order(symbol, direction, lots, cur, sl, tp, label)
-
-        except Exception as e:
-            log.error("execution failed for ref=%s: %s", ref_key, e)
-            continue
-        if not fill.ok:
-            log.warning("order rejected ref=%s: %s", ref_key, fill.message[:200])
-            continue
-        # Record in ledger with full sizing and exit management context
-        ledger.data[str(ref_key)] = {
-            "ref": ref_key,
-            "symbol": symbol,
-            "direction": direction,
-            "lots": lots,
-            "fill_price": fill.fill_price,
-            "entry_delivered": entry_price,
-            "sl": sl,
-            "tp": tp,
-            "rr": round(actual_rr, 2),
-            "risk_usd": round(risk_usd, 2),
-            "order_id": fill.order_id,
-            "broker": fill.broker,
-            "ts": fill.ts,
-            "signal_ts": signal_ts,
-            "status": "open",
-            "sl_state": "initial",
-            "peak_mfe_r": 0.0,
-            "profile": entry.get("profile", ""),
-            "ltf_confirmed": entry.get("ltf_confirmed", False),
-        }
-        ledger.save()
-        try:
-            pending_retrace = _load_pending_retrace()
-            if str(ref_key) in pending_retrace:
-                del pending_retrace[str(ref_key)]
-                _save_pending_retrace(pending_retrace)
-        except Exception:
-            pass
-        msg = _format_fill_message(fill, entry)
-        if CHAT_ID:
-            send(CHAT_ID, msg)
-        log.info("FILLED ref=%s %s %s @ %.5f %.2f lots",
-                 ref_key, symbol, "LONG" if direction == 1 else "SHORT",
-                 fill.fill_price, lots)
-        fired_any = True
-        active_open_count += 1
-        at_risk_count += 1
-        open_positions.append(ledger.data[str(ref_key)])
-        at_risk_positions.append(ledger.data[str(ref_key)])
+    # 1. Execute remote setups from state.json (with staleness and slippage guards)
+    for entry in reversed(history):
+        fired, active_open_count, at_risk_count = _execute_setup_entry(
+            entry, ledger, ex, rm,
+            active_open_count, at_risk_count,
+            open_positions, at_risk_positions,
+            is_local_scan=False,
+            outcomes=outcomes
+        )
+        if fired:
+            fired_any = True
 
 
     # 2. Process pending retracements (Option 1: M5 Swing Sniper for Gold)

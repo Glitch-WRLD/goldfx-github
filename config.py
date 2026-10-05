@@ -139,27 +139,28 @@ def dynamic_portfolio_capacity(balance: float, is_cent: bool = False) -> tuple[i
     else:
         return 20, 12, 3, 50.0, f"Tier 3 ($500+ Standard · ${balance:.2f} · 20 Total / 12 At-Risk Max · 3/Pair At-Risk · 5/Pair Total)"
 
-# ---- Smart Reversal Early Exit (Asset-Specific: XAUUSD only) ----
-GOLD_REVERSAL_EXIT_ENABLED = os.getenv("GOLD_REVERSAL_EXIT_ENABLED", "1") == "1"
+# ---- Smart Reversal Early Exit (Disabled: Let Winners Run to Full TP) ----
+GOLD_REVERSAL_EXIT_ENABLED = os.getenv("GOLD_REVERSAL_EXIT_ENABLED", "0") == "1"
 GOLD_REVERSAL_MIN_MFE_R    = float(os.getenv("GOLD_REVERSAL_MIN_MFE_R", "0.5"))
 GOLD_REVERSAL_TF           = os.getenv("GOLD_REVERSAL_TF", "M15")
 
-# ---- Trade Protection & Progressive Trailing (Percentage-of-TP Engine) ----
-TRAIL_MODE                 = os.getenv("TRAIL_MODE", "PERCENTAGE")            # "PERCENTAGE" (proportional to TP) or "FIXED_R"
+# ---- Trade Protection: Maintain 0.8R Breakeven, Disable Trailing Stops (Let Winners Run to 100% TP) ----
+BREAKEVEN_ENABLED          = os.getenv("BREAKEVEN_ENABLED", "1") == "1"       # Stage 1: Move SL to BE (+1 pip) when price reaches >= 50% TP / 0.8R
 BREAKEVEN_PCT_TP           = float(os.getenv("BREAKEVEN_PCT_TP", "50.0"))     # Stage 1: Move SL to BE (+1 pip) when price reaches >= 50% of TP
 BREAKEVEN_PCT_TP_GBPAUD    = float(os.getenv("BREAKEVEN_PCT_TP_GBPAUD", "70.0")) # Stage 1 GBPAUD: Wider BE buffer (70% TP) for deep SMC inducement retests
-TRAIL_STAGE1_PCT_TP        = float(os.getenv("TRAIL_STAGE1_PCT_TP", "85.0"))  # Stage 2: Trail SL when price reaches >= 85% of TP (widened from 75% so winners run)
-TRAIL_STAGE1_PCT_TP_GBPAUD = float(os.getenv("TRAIL_STAGE1_PCT_TP_GBPAUD", "85.0")) # Stage 2 GBPAUD: Trail SL when price reaches >= 85% of TP
-TRAIL_STAGE1_LOCK_PCT      = float(os.getenv("TRAIL_STAGE1_LOCK_PCT", "70.0"))# Lock in 70% of target profit at Stage 2 (raised from 50% to ensure large wins)
-TRAIL_STAGE2_PCT_TP        = float(os.getenv("TRAIL_STAGE2_PCT_TP", "92.0"))  # Stage 3: Trail SL when price reaches >= 92% of TP
-TRAIL_STAGE2_LOCK_PCT      = float(os.getenv("TRAIL_STAGE2_LOCK_PCT", "80.0"))# Lock in 80% of target profit at Stage 3
-
-# Fallback / Fixed R settings
 BREAKEVEN_MFE_R            = float(os.getenv("BREAKEVEN_MFE_R", "0.8"))      # Stage 1: Move SL to BE (+1 pip buffer) at >= 0.8R
-TRAIL_STAGE1_MFE_R         = float(os.getenv("TRAIL_STAGE1_MFE_R", "1.5"))   # Stage 2: Trail SL to +0.8R profit at >= 1.5R (widened from 1.3R -> 0.5R)
-TRAIL_STAGE1_LOCK_R        = float(os.getenv("TRAIL_STAGE1_LOCK_R", "0.8"))  # Locked R for Stage 2 (+0.8R)
-TRAIL_STAGE2_MFE_R         = float(os.getenv("TRAIL_STAGE2_MFE_R", "1.8"))   # Stage 3: Trail SL to +1.2R profit at >= 1.8R
-TRAIL_STAGE2_LOCK_R        = float(os.getenv("TRAIL_STAGE2_LOCK_R", "1.2"))  # Locked R for Stage 3 (+1.2R)
+TRAIL_ENABLED              = os.getenv("TRAIL_ENABLED", "0") == "1"          # Disabled: Trailing stops cut winners at 70-80% TP; disabled to allow full 100% TP wins
+TRAIL_MODE                 = os.getenv("TRAIL_MODE", "NONE")                 # "NONE" = pure BE + full TP targets (1.3R to 2.5R)
+TRAIL_STAGE1_PCT_TP        = float(os.getenv("TRAIL_STAGE1_PCT_TP", "85.0"))
+TRAIL_STAGE1_LOCK_PCT      = float(os.getenv("TRAIL_STAGE1_LOCK_PCT", "70.0"))
+TRAIL_STAGE2_PCT_TP        = float(os.getenv("TRAIL_STAGE2_PCT_TP", "92.0"))
+TRAIL_STAGE2_LOCK_PCT      = float(os.getenv("TRAIL_STAGE2_LOCK_PCT", "80.0"))
+
+# ---- Signal Freshness & Slippage Armor (Prevents Late/Chased Entries) ----
+MAX_SIGNAL_AGE_MIN         = float(os.getenv("MAX_SIGNAL_AGE_MIN", "15.0"))  # Abort fills if setup is older than 15 mins
+MAX_ENTRY_SLIPPAGE_PIPS    = float(os.getenv("MAX_ENTRY_SLIPPAGE_PIPS", "4.0")) # Abort fills if FX drifted > 4.0 pips from delivered entry
+MAX_ENTRY_SLIPPAGE_GOLD    = float(os.getenv("MAX_ENTRY_SLIPPAGE_GOLD", "0.80"))# Abort fills if Gold drifted > $0.80 from delivered entry
+LOCAL_SCANNER_ENABLED      = os.getenv("LOCAL_SCANNER_ENABLED", "1") == "1"   # 1 = Run real-time MT5 scanner on local machine (0ms latency)
 
 # ---- DXY Macro Momentum Filter (Forex Pairs Only) ----
 DXY_FILTER_ENABLED         = os.getenv("DXY_FILTER_ENABLED", "1") == "1"     # 1 = Filter pure Forex by US Dollar index momentum

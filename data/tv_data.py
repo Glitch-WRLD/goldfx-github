@@ -118,7 +118,52 @@ def _run_async(coro) -> pd.DataFrame:
         return box["value"]
 
 
+def _fetch_from_mt5(symbol: str, tf: str) -> pd.DataFrame | None:
+    """Fetch live candles directly from MetaTrader 5 terminal if connected (0ms broker latency)."""
+    try:
+        import MetaTrader5 as mt5
+        import datetime as dt
+        if not mt5.terminal_info():
+            return None
+        tf_map = {
+            "M5": mt5.TIMEFRAME_M5,
+            "M15": mt5.TIMEFRAME_M15,
+            "M30": mt5.TIMEFRAME_M30,
+            "H1": mt5.TIMEFRAME_H1,
+            "H2": mt5.TIMEFRAME_H2,
+            "H4": mt5.TIMEFRAME_H4,
+        }
+        if tf not in tf_map:
+            return None
+        if not mt5.symbol_select(symbol, True):
+            return None
+
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            return None
+        now_utc = dt.datetime.now(dt.timezone.utc).timestamp()
+        offset_sec = round((tick.time - now_utc) / 3600.0) * 3600
+
+        rates = mt5.copy_rates_from_pos(symbol, tf_map[tf], 0, 500)
+        if rates is None or len(rates) < 30:
+            return None
+
+        df = pd.DataFrame(rates)
+        df["time"] = pd.to_datetime(df["time"] - offset_sec, unit="s", utc=True)
+        df.set_index("time", inplace=True)
+        df.rename(columns={"tick_volume": "volume"}, inplace=True)
+        return df
+    except Exception:
+        return None
+
+
 def get_df(symbol: str, tf: str, refresh: bool = False) -> pd.DataFrame:
+    # 1. Prefer MT5 direct broker feed if available (0ms latency, real broker bars)
+    df_mt5 = _fetch_from_mt5(symbol, tf)
+    if df_mt5 is not None and len(df_mt5) >= 30:
+        return df_mt5
+
+    # 2. Fall back to TradingView cached / websocket data (for GitHub Actions)
     cached = None if refresh else load_cached(symbol, tf)
     if cached is not None:
         return cached

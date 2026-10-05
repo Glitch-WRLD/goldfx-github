@@ -262,6 +262,21 @@ class Mt5Broker:
             return float(tick.ask - tick.bid)
         return 0.0
 
+    def get_spread_pips(self, symbol: str) -> tuple[float, float]:
+        """Return (spread_pips, current_price)."""
+        mt5 = _import_mt5()
+        mt5.symbol_select(symbol, True)
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            return 0.0, 0.0
+        ask = getattr(tick, "ask", 0.0)
+        bid = getattr(tick, "bid", 0.0)
+        cur = ask if ask > 0 else bid
+        spread_price = ask - bid if (ask > 0 and bid > 0) else 0.0
+        pip_unit = 0.01 if "JPY" in symbol or symbol == "XAUUSD" else (1.0 if any(idx in symbol for idx in ["100", "500", "30"]) else 0.0001)
+        spread_pips = spread_price / pip_unit if pip_unit > 0 else 0.0
+        return float(spread_pips), float(cur)
+
     def get_open_positions(self) -> list[dict]:
         """Return all active positions in the terminal."""
         mt5 = _import_mt5()
