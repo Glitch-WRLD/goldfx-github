@@ -2387,20 +2387,6 @@ def scan_local_mt5_setups(
 
                 if fired:
                     fired_count += 1
-                    # Update local state.json so it records the delivery locally
-                    try:
-                        local_state_file = Path(__file__).resolve().parents[1] / "gha_state" / "state.json"
-                        if local_state_file.exists():
-                            lstate = json.loads(local_state_file.read_text(encoding="utf-8"))
-                            lstate["ref_seq"] = next_ref
-                            hist = lstate.setdefault("history", [])
-                            hist.insert(0, entry_dict)
-                            deliv = set(lstate.setdefault("delivered", []))
-                            deliv.add(f"{symbol}:{sig_ts_iso}")
-                            lstate["delivered"] = sorted(deliv)
-                            local_state_file.write_text(json.dumps(lstate, indent=1), encoding="utf-8")
-                    except Exception as lse:
-                        log.debug("local state.json update failed: %s", lse)
 
         except Exception as e:
             log.warning("scan_local_mt5_setups error for %s: %s", symbol, e)
