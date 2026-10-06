@@ -129,11 +129,18 @@ def _enqueue(chat_id: str | int, text: str) -> None:
                 len(pending), text[:60])
 
 
-def send(chat_id: str | int, text: str) -> bool:
+def send(chat_id: str | int, text: str, parse_mode: str | None = "HTML") -> bool:
     """Deliver immediately; if it fails after all retries, persist to the
     pending queue so a spotty uplink can never silently eat a fill."""
-    res = tg("sendMessage", chat_id=chat_id, text=text)
+    params = {"chat_id": chat_id, "text": text}
+    if parse_mode:
+        params["parse_mode"] = parse_mode
+    res = tg("sendMessage", **params)
     ok = bool(res.get("ok"))
+    if not ok and parse_mode:
+        # Fallback to plain text if HTML parsing encounters any issue
+        res = tg("sendMessage", chat_id=chat_id, text=text)
+        ok = bool(res.get("ok"))
     if not ok:
         _enqueue(chat_id, text)
         return False
@@ -149,8 +156,12 @@ def flush_pending() -> int:
     delivered = 0
     still = []
     for m in pending:
-        ok = bool(tg("sendMessage", chat_id=m["chat_id"],
-                     text=m["text"]).get("ok"))
+        cid = m["chat_id"]
+        txt = m["text"]
+        res = tg("sendMessage", chat_id=cid, text=txt, parse_mode="HTML")
+        if not res.get("ok"):
+            res = tg("sendMessage", chat_id=cid, text=txt)
+        ok = bool(res.get("ok"))
         if ok:
             delivered += 1
             log.info("replayed queued telegram msg (age %.0fs)",
