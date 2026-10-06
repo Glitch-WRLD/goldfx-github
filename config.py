@@ -51,7 +51,12 @@ RETRACE_MIN_PULLBACK_PCT = float(os.getenv("RETRACE_MIN_PULLBACK_PCT", "0.25")) 
 RETRACE_MAX_RISK_USD = float(os.getenv("RETRACE_MAX_RISK_USD", "7.50"))          # max allowed dollar risk on sniper entry
 RETRACE_BUFFER_USD = float(os.getenv("RETRACE_BUFFER_USD", "0.50"))              # buffer below swing low / above swing high
 RETRACE_MAX_WAIT_HOURS = float(os.getenv("RETRACE_MAX_WAIT_HOURS", "6.0"))       # expire if no entry after 6h
-RETRACE_INVAL_TP_PCT = float(os.getenv("RETRACE_INVAL_TP_PCT", "0.75"))          # cancel if 75% of TP reached before pullback
+RETRACE_INVAL_TP_PCT = float(os.getenv("RETRACE_INVAL_TP_PCT", "0.90"))          # cancel if 90% of TP reached before pullback
+
+# ---- Momentum Continuation Fill (Prevents Missed Runaways) ----
+MOMENTUM_FILL_ENABLED       = os.getenv("MOMENTUM_FILL_ENABLED", "1") == "1"      # 1 = Fill runaway setups if live RR is favorable
+MOMENTUM_FILL_MAX_TP_PCT    = float(os.getenv("MOMENTUM_FILL_MAX_TP_PCT", "0.55"))# Allow momentum entry up to 55% of move to TP
+MOMENTUM_FILL_MIN_RR        = float(os.getenv("MOMENTUM_FILL_MIN_RR", "0.90"))   # Require at least 0.90 live RR from current market price
 
 # ---- Small-Account & Gold Quarantine Guards ($10 - $100 Accounts) ----
 GOLD_QUARANTINE_ENABLED = os.getenv("GOLD_QUARANTINE_ENABLED", "1") == "1"

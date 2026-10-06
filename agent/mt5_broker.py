@@ -208,8 +208,35 @@ class Mt5Broker:
                         extra={"retcode": 10009, "ticket": p.ticket},
                     )
 
-        request = {
+        # Dynamic Margin Protection: Check free margin and auto-scale lots if free margin is tight
+        acc = mt5.account_info()
+        if acc is not None:
+            free_margin = float(getattr(acc, "margin_free", 0.0))
+            order_type = mt5.ORDER_TYPE_BUY if direction == 1 else mt5.ORDER_TYPE_SELL
+            calc_m = mt5.order_calc_margin(order_type, symbol, float(lots), price)
+            if calc_m is not None and calc_m > 0 and free_margin > 0:
+                max_safe_margin = free_margin * 0.85
+                if calc_m > max_safe_margin:
+                    vol_min = float(getattr(info, "volume_min", 0.01))
+                    vol_step = float(getattr(info, "volume_step", 0.01))
+                    scale_ratio = max_safe_margin / calc_m
+                    scaled_lots = float(lots) * scale_ratio
+                    steps = int(scaled_lots / vol_step)
+                    scaled_lots = round(steps * vol_step, 2)
+                    if scaled_lots >= vol_min:
+                        log.warning(
+                            "MARGIN_AUTO_SCALE %s: Reduced lots from %.2f to %.2f "
+                            "(margin required $%.2f > safe free margin $%.2f). Preventing 'No money' rejection.",
+                            symbol, lots, scaled_lots, calc_m, max_safe_margin
+                        )
+                        lots = scaled_lots
+                    else:
+                        log.warning(
+                            "MARGIN_DEFICIT %s: Min lot %.2f requires $%.2f margin, but free margin is $%.2f.",
+                            symbol, vol_min, calc_m * (vol_min / float(lots)), free_margin
+                        )
 
+        request = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": symbol,
             "volume": float(lots),
@@ -232,20 +259,34 @@ class Mt5Broker:
                 last_err = f"order_send returned None: {mt5.last_error()}"
                 continue
             retcode = getattr(res, "retcode", None) if not isinstance(res, dict) else res.get("retcode")
+
+            # Dynamic Margin Retry: if rejected due to 10019 (No money), retry with reduced volume
+            if retcode == 10019:
+                vol_min = float(getattr(info, "volume_min", 0.01))
+                cur_vol = float(request["volume"])
+                if cur_vol > vol_min:
+                    reduced_vol = round(max(vol_min, cur_vol * 0.5), 2)
+                    log.warning("MARGIN_RETRY 10019 %s: Retrying with reduced volume %.2f (was %.2f)",
+                                symbol, reduced_vol, cur_vol)
+                    request["volume"] = reduced_vol
+                    res = mt5.order_send(request)
+                    retcode = getattr(res, "retcode", None) if not isinstance(res, dict) else res.get("retcode")
+
             if retcode in _DONE_CODES:
                 price_fill = getattr(res, "price", 0.0) if not isinstance(res, dict) else res.get("price", 0.0)
                 order_id = getattr(res, "order", "") if not isinstance(res, dict) else res.get("order", "")
+                actual_lots = float(request["volume"])
                 return Fill(
                     ok=True,
                     symbol=symbol,
                     direction=direction,
-                    lots=lots,
+                    lots=actual_lots,
                     fill_price=float(price_fill),
                     order_id=str(order_id),
                     broker="mt5",
                     ts=dt.datetime.now(dt.timezone.utc).isoformat(),
                     message=f"MT5 FILL {symbol} {'BUY' if direction == 1 else 'SELL'} "
-                            f"{lots:g} lots @ {float(price_fill):g}",
+                            f"{actual_lots:g} lots @ {float(price_fill):g}",
                     extra={"retcode": retcode, "ticket": order_id},
                 )
             comment = getattr(res, "comment", "no comment") if not isinstance(res, dict) else res.get("comment", "no comment")

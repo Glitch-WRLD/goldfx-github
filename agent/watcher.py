@@ -1326,19 +1326,19 @@ def process_pending_retracements(ledger) -> int:
             still_pending[ref_key] = item
             continue
 
-        # B. Invalidation check: 75% TP reached before pullback entry
+        # B. Invalidation check: 90% TP reached before pullback entry
         if (direction == 1 and cur >= tp_75) or (direction == -1 and cur <= tp_75):
-            log.info("RETRACE_INVALIDATED ref=%s — hit 75%% TP before pullback (cur %.2f, tp75 %.2f)",
+            log.info("RETRACE_INVALIDATED ref=%s — hit 90%% TP before pullback (cur %.2f, tp_inval %.2f)",
                      ref_key, cur, tp_75)
-            ledger.record_outcome(ref_key, status="skipped", hit="invalidated_tp75",
-                                  pnl_usd=0.0, classification="retrace_inval_tp75")
+            ledger.record_outcome(ref_key, status="skipped", hit="invalidated_tp90",
+                                  pnl_usd=0.0, classification="retrace_inval_tp90")
             msg = (
-                f"\u26AA {symbol} \u2014 SETUP #{ref_key} CANCELLED (75% TP REACHED)"
-                f"\n{'\u2500' * 26}"
-                f"\nPrice reached 75% of target before retracing into safe discount."
-                f"\nOrder cancelled to avoid chasing exhausted move."
-                f"\n{'\u2500' * 26}"
-                f"\n\U0001F6E1\uFE0F Capital preserved."
+                f"⚪ {symbol} — SETUP #{ref_key} CANCELLED (90% TP REACHED)\n"
+                f"{'─' * 26}\n"
+                f"Price reached 90% of target before retracing into safe discount.\n"
+                f"Order cancelled to avoid chasing exhausted move.\n"
+                f"{'─' * 26}\n"
+                f"🛡️ Capital preserved."
             )
             if CHAT_ID:
                 send(CHAT_ID, msg)
@@ -2051,54 +2051,73 @@ def _execute_setup_entry(
             send(CHAT_ID, msg)
         return False, active_open_count, at_risk_count
 
-    # Check D: Anti-Chase Guard (price already ran >25% towards TP)
-    max_chase_pct = float(getattr(config, "MAX_CHASE_TP_PCT", 0.25))
-    if (direction == 1 and cur > entry_price + max_chase_pct * orig_tp_dist) or \
-       (direction == -1 and cur < entry_price - max_chase_pct * orig_tp_dist):
-        log.info("skip %s ref=%s — anti-chase guard: price already ran >%.0f%% towards TP (cur %.5f, entry %.5f, tp %.5f)",
-                 symbol, ref_key, max_chase_pct * 100, cur, entry_price, tp)
-        if getattr(config, "RETRACE_ENABLED", True):
-            pending_retrace = _load_pending_retrace()
-            if str(ref_key) not in pending_retrace:
-                tp_75 = entry_price + (tp - entry_price) * getattr(config, "RETRACE_INVAL_TP_PCT", 0.75)
-                pb_thresh = entry_price
-                pending_retrace[str(ref_key)] = {
-                    "ref": ref_key,
-                    "symbol": symbol,
-                    "direction": direction,
-                    "entry_delivered": entry_price,
-                    "sl_orig": sl,
-                    "tp": tp,
-                    "orig_risk": orig_sl_dist,
-                    "orig_rr": rr,
-                    "signal_ts": signal_ts,
-                    "first_seen_ts": time.time(),
-                    "tp_75": tp_75,
-                    "pullback_min_dist": pb_thresh,
-                    "had_pullback": False,
-                    "profile": entry.get("profile", ""),
-                    "label": f"goldfx #{ref_key}" if str(ref_key).isdigit() else f"goldfx {ref_key}",
-                }
-                _save_pending_retrace(pending_retrace)
-                d_str = "LONG" if direction == 1 else "SHORT"
-                digits_fmt = 2 if symbol == "XAUUSD" else config.CONTRACTS.get(symbol, {}).get("digits", 5)
-                msg = (
-                    f"🟡 {symbol} — PENDING M5 PULLBACK SNIPER {d_str}\n"
-                    f"{'─' * 26}\n"
-                    f"Setup #{ref_key} · {d_str} @ {cur:.{digits_fmt}f}\n"
-                    f"Price ran >{max_chase_pct*100:.0f}% towards TP ({cur:.{digits_fmt}f} vs {entry_price:.{digits_fmt}f}).\n"
-                    f"Anti-Chase active: Bot will wait for M5 pullback to entry zone ({entry_price:.{digits_fmt}f}) + M5 reversal structure to enter safely.\n"
-                    f"{'─' * 26}\n"
-                    f"🛡️ Capital preservation & entry optimization active."
-                )
-                if CHAT_ID:
-                    send(CHAT_ID, msg)
-                log.info("ENQUEUED_RETRACE %s ref=%s — price ran >%.0f%% towards TP; waiting for M5 pullback to entry zone %.5f",
-                         symbol, ref_key, max_chase_pct * 100, pb_thresh)
+    # Check D: Anti-Chase Guard & Momentum Continuation Fill (Solution 3)
+    max_chase_pct = float(getattr(config, "MAX_CHASE_TP_PCT", 0.35))
+    chase_pct = 0.0
+    if orig_tp_dist > 0:
+        if direction == 1 and cur > entry_price:
+            chase_pct = (cur - entry_price) / orig_tp_dist
+        elif direction == -1 and cur < entry_price:
+            chase_pct = (entry_price - cur) / orig_tp_dist
+
+    if chase_pct > max_chase_pct:
+        momentum_max_pct = float(getattr(config, "MOMENTUM_FILL_MAX_TP_PCT", 0.55))
+        momentum_min_rr = float(getattr(config, "MOMENTUM_FILL_MIN_RR", 0.90))
+        live_sl_dist = abs(cur - sl)
+        live_tp_dist = abs(tp - cur)
+        live_rr = live_tp_dist / live_sl_dist if live_sl_dist > 0 else 0.0
+
+        if getattr(config, "MOMENTUM_FILL_ENABLED", True) and chase_pct <= momentum_max_pct and live_rr >= momentum_min_rr:
+            log.info(
+                "MOMENTUM_CONTINUATION_FILL %s ref=%s: Price ran %.1f%% to TP, but live RR=%.2f is favorable (min %.2f). "
+                "Executing immediate market entry with dynamically adjusted sizing.",
+                symbol, ref_key, chase_pct * 100, live_rr, momentum_min_rr
+            )
         else:
-            ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_chase_avoided",
-                                  pnl_usd=0.0, classification="chase_avoided")
-        return False, active_open_count, at_risk_count
+            log.info("skip %s ref=%s — anti-chase guard: price already ran >%.0f%% towards TP (cur %.5f, entry %.5f, tp %.5f, chase %.1f%%)",
+                     symbol, ref_key, max_chase_pct * 100, cur, entry_price, tp, chase_pct * 100)
+            if getattr(config, "RETRACE_ENABLED", True):
+                pending_retrace = _load_pending_retrace()
+                if str(ref_key) not in pending_retrace:
+                    tp_inval = entry_price + (tp - entry_price) * getattr(config, "RETRACE_INVAL_TP_PCT", 0.90)
+                    pb_thresh = entry_price
+                    pending_retrace[str(ref_key)] = {
+                        "ref": ref_key,
+                        "symbol": symbol,
+                        "direction": direction,
+                        "entry_delivered": entry_price,
+                        "sl_orig": sl,
+                        "tp": tp,
+                        "orig_risk": orig_sl_dist,
+                        "orig_rr": rr,
+                        "signal_ts": signal_ts,
+                        "first_seen_ts": time.time(),
+                        "tp_75": tp_inval,
+                        "pullback_min_dist": pb_thresh,
+                        "had_pullback": False,
+                        "profile": entry.get("profile", ""),
+                        "label": f"goldfx #{ref_key}" if str(ref_key).isdigit() else f"goldfx {ref_key}",
+                    }
+                    _save_pending_retrace(pending_retrace)
+                    d_str = "LONG" if direction == 1 else "SHORT"
+                    digits_fmt = 2 if symbol == "XAUUSD" else config.CONTRACTS.get(symbol, {}).get("digits", 5)
+                    msg = (
+                        f"🟡 {symbol} — PENDING M5 PULLBACK SNIPER {d_str}\n"
+                        f"{'─' * 26}\n"
+                        f"Setup #{ref_key} · {d_str} @ {cur:.{digits_fmt}f}\n"
+                        f"Price ran >{max_chase_pct*100:.0f}% towards TP ({cur:.{digits_fmt}f} vs {entry_price:.{digits_fmt}f}).\n"
+                        f"Anti-Chase active: Bot will wait for M5 pullback to entry zone ({entry_price:.{digits_fmt}f}) + M5 reversal structure to enter safely.\n"
+                        f"{'─' * 26}\n"
+                        f"🛡️ Capital preservation & entry optimization active."
+                    )
+                    if CHAT_ID:
+                        send(CHAT_ID, msg)
+                    log.info("ENQUEUED_RETRACE %s ref=%s — price ran >%.0f%% towards TP; waiting for M5 pullback to entry zone %.5f",
+                             symbol, ref_key, max_chase_pct * 100, pb_thresh)
+            else:
+                ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_chase_avoided",
+                                      pnl_usd=0.0, classification="chase_avoided")
+            return False, active_open_count, at_risk_count
 
     # Gold Quarantine & Small Account Capital Shield
     is_cent_account = getattr(config, "IS_CENT_ACCOUNT", False)
@@ -2262,6 +2281,7 @@ def _execute_setup_entry(
 
 _local_fvg_scanner = None
 _last_scanned_bars: dict[str, str] = {}
+_last_scanned_isde_m5: dict[str, str] = {}
 
 
 def scan_local_mt5_setups(
@@ -2285,7 +2305,7 @@ def scan_local_mt5_setups(
     if not hasattr(ex, "broker") or ex.broker != "mt5":
         return 0, active_open_count, at_risk_count
 
-    global _local_fvg_scanner, _last_scanned_bars
+    global _local_fvg_scanner, _last_scanned_bars, _last_scanned_isde_m5
     if _local_fvg_scanner is None:
         from engine.scanner import FVGScanner
         profile_name = getattr(config, "SCANNER_PROFILE", "balanced")
@@ -2294,6 +2314,7 @@ def scan_local_mt5_setups(
     fired_count = 0
     from data.tv_data import get_df
 
+    # 1. Standard Multi-Timeframe FVG Retest & SMC Scanner (Candle close of primary timeframe)
     for symbol, rt in SYMBOL_RUNTIME.items():
         entry_tf = rt["entry_tf"]
         bias_htf = rt["bias_htf"]
@@ -2383,6 +2404,90 @@ def scan_local_mt5_setups(
 
         except Exception as e:
             log.warning("scan_local_mt5_setups error for %s: %s", symbol, e)
+
+    # 2. Institutional Session Delivery Engine (ISDE M5 Precision Local Scanner)
+    if getattr(config, "ISDE_ENABLED", True):
+        isde_windows = getattr(config, "ISDE_WINDOWS", {})
+        now_utc_hour = dt.datetime.now(dt.timezone.utc).hour
+        for symbol, cfg in isde_windows.items():
+            sh = cfg.get("start_utc", 7)
+            eh = cfg.get("end_utc", 15)
+            # Active killzone: London (07:00-09:00 UTC) or NY Silver Bullet (14:00-15:00 UTC)
+            if not (sh <= now_utc_hour < eh):
+                continue
+
+            try:
+                df_m5 = get_df(symbol, "M5", refresh=True)
+                if df_m5 is None or len(df_m5) < 50:
+                    continue
+
+                last_closed_m5 = str(df_m5.index[-2])
+                if _last_scanned_isde_m5.get(symbol) == last_closed_m5:
+                    continue
+
+                _last_scanned_isde_m5[symbol] = last_closed_m5
+
+                isde_sigs = _local_fvg_scanner.scan_isde_signals(symbol, lookback=2)
+                if not isde_sigs:
+                    continue
+
+                for sig in isde_sigs:
+                    sig_ts_iso = sig.ts.isoformat()
+                    if any(pos.get("symbol") == symbol and str(pos.get("signal_ts")) == sig_ts_iso for pos in ledger.data.values()):
+                        continue
+                    pending_retrace = _load_pending_retrace()
+                    if any(item.get("symbol") == symbol and str(item.get("signal_ts")) == sig_ts_iso for item in pending_retrace.values()):
+                        continue
+
+                    max_ledger_ref = max([int(k) for k in ledger.data.keys() if str(k).isdigit()] or [180])
+                    state = fetch_state()
+                    max_state_ref = int(state.get("ref_seq", 180)) if isinstance(state.get("ref_seq"), (int, str)) and str(state.get("ref_seq")).isdigit() else 180
+                    next_ref = max(max_ledger_ref, max_state_ref) + 1
+
+                    entry_dict = {
+                        "symbol": symbol,
+                        "dir": "LONG" if sig.direction == 1 else "SHORT",
+                        "entry": sig.entry,
+                        "sl": sig.stop,
+                        "tp": sig.take_profit,
+                        "rr": sig.rr,
+                        "ref": next_ref,
+                        "tf": "M5",
+                        "ts": sig_ts_iso,
+                        "profile": getattr(sig, "profile", "balanced"),
+                        "strategy_type": "isde_session",
+                        "strategy_badge": "🎯 ISDE Session Delivery",
+                        "is_local_scan": True,
+                    }
+
+                    log.info("LOCAL_ISDE_DETECT: %s %s @ %.5f (ref #%d, ts=%s, tf=M5)",
+                             symbol, entry_dict["dir"], sig.entry, next_ref, sig_ts_iso)
+
+                    fired, active_open_count, at_risk_count = _execute_setup_entry(
+                        entry_dict, ledger, ex, rm,
+                        active_open_count, at_risk_count,
+                        open_positions, at_risk_positions,
+                        is_local_scan=True,
+                        outcomes=None,
+                    )
+
+                    if fired:
+                        fired_count += 1
+                        try:
+                            local_state_file = Path(__file__).resolve().parents[1] / "gha_state" / "state.json"
+                            if local_state_file.exists():
+                                lstate = json.loads(local_state_file.read_text(encoding="utf-8"))
+                                lstate["ref_seq"] = next_ref
+                                hist = lstate.setdefault("history", [])
+                                hist.insert(0, entry_dict)
+                                deliv = set(lstate.setdefault("delivered", []))
+                                deliv.add(f"{symbol}:{sig_ts_iso}")
+                                lstate["delivered"] = sorted(deliv)
+                                local_state_file.write_text(json.dumps(lstate, indent=1), encoding="utf-8")
+                        except Exception as lse:
+                            log.debug("local state.json update failed: %s", lse)
+            except Exception as isde_err:
+                log.warning("scan_local_mt5_setups ISDE error for %s: %s", symbol, isde_err)
 
     return fired_count, active_open_count, at_risk_count
 
