@@ -664,78 +664,131 @@ def manage_open_positions(ledger) -> int:
                     elif tp_val > 0:
                         dist_to_tp = abs(exit_price - tp_val)
                         target_span = abs(tp_val - fill_p)
-                        if target_span > 0 and (dist_to_tp / target_span) <= 0.10:
+                        if target_span > 0 and (dist_to_tp / target_span) <= 0.10 and pnl_raw > 0:
                             is_full_tp = True
-                        elif target_profit > 0 and pnl_raw >= 0.50 * target_profit:
+                        elif target_profit > 0 and pnl_raw >= 0.80 * target_profit:
                             is_full_tp = True
 
                     # 2. Was it a Breakeven exit?
                     is_be_exit = False
                     if not is_full_tp:
                         if sl_state == "be" or "[be" in comment:
+                            if pnl_raw >= -0.20 * risk_val and pnl_raw <= 0.35 * risk_val:
+                                is_be_exit = True
+                        elif abs(pnl_raw) <= 0.20 * risk_val and peak_mfe >= 0.5:
                             is_be_exit = True
-                        elif abs(pnl_raw) < 0.20 * risk_val and peak_mfe >= 0.5:
-                            is_be_exit = True
+
+                    # 3. Was it a Trailing Stop exit?
+                    is_trail_exit = False
+                    if not is_full_tp and not is_be_exit and sl_state in ("trail_10", "trail_05") and pnl_raw > 0:
+                        is_trail_exit = True
+
+                    realized_r = (pnl_raw / risk_val) if risk_val > 0 else 0.0
+                    peak_pct_tp = float(pos.get("peak_pct_tp", 0.0))
+                    if peak_pct_tp <= 0 and rr_val > 0 and peak_mfe > 0:
+                        peak_pct_tp = (peak_mfe / rr_val) * 100.0
 
                     if is_full_tp:
                         hit = "tp"
                         classification = "broker_tp"
-                    elif sl_state == "trail_10":
+                    elif is_trail_exit:
                         hit = "trail_tp"
-                        classification = "broker_trailed_profit_10"
-                    elif sl_state == "trail_05":
-                        hit = "trail_tp"
-                        classification = "broker_trailed_profit_05"
+                        classification = f"broker_trailed_profit_{sl_state[-2:]}"
                     elif is_be_exit:
                         hit = "be"
                         classification = "be_avoided_sl"
-                    else:
-                        hit = "sl"
-                        if peak_mfe >= 0.5:
-                            classification = "giveback_sl"
-                        elif peak_mfe < 0.15:
-                            classification = "bad_entry"
+                    elif pnl_raw > 0:
+                        # Profit banked BEFORE reaching full TP (e.g. manual close or early exit)
+                        hit = "early_tp"
+                        classification = "manual_profit_banked" if reason in (0, 1, 2) else "early_profit_banked"
+                    elif pnl_raw < 0:
+                        # Loss scenario: Check if full SL was hit or if loss was cut/mitigated early
+                        is_full_sl = False
+                        if reason == 4 or "[sl" in comment:
+                            if sl_state == "initial" or abs(pnl_raw) >= 0.80 * risk_val:
+                                is_full_sl = True
+                            elif sl_val > 0:
+                                dist_to_sl = abs(exit_price - sl_val)
+                                sl_span = abs(fill_p - sl_val)
+                                if sl_span > 0 and (dist_to_sl / sl_span) <= 0.15:
+                                    is_full_sl = True
+                        elif abs(pnl_raw) >= 0.85 * risk_val:
+                            is_full_sl = True
+
+                        if is_full_sl:
+                            hit = "sl"
+                            if peak_mfe >= 0.5:
+                                classification = "giveback_sl"
+                            elif peak_mfe < 0.15:
+                                classification = "bad_entry"
+                            else:
+                                classification = "breach"
+
+                            # Phase 2: Enqueue stopped-out trade for Turtle Soup / Inducement Sweep Re-Entry
+                            if getattr(config, "TURTLE_SOUP_REENTRY_ENABLED", True) and not str(ref).startswith("soup_"):
+                                try:
+                                    pending_soup = _load_pending_turtle_soup()
+                                    ref_str = str(ref)
+                                    if ref_str not in pending_soup:
+                                        fill_price_val = float(pos.get("fill_price", 0.0))
+                                        sl_price_val = float(pos.get("sl", 0.0))
+                                        tp_price_val = float(pos.get("tp", 0.0))
+                                        sl_dist_val = abs(fill_price_val - sl_price_val)
+                                        direction_val = int(pos.get("direction", 1))
+                                        if sl_dist_val > 0 and tp_price_val > 0:
+                                            pending_soup[ref_str] = {
+                                                "ref": ref,
+                                                "symbol": pos.get("symbol"),
+                                                "direction": direction_val,
+                                                "original_entry": fill_price_val,
+                                                "original_sl": sl_price_val,
+                                                "original_tp": tp_price_val,
+                                                "sl_dist": sl_dist_val,
+                                                "risk_usd": float(pos.get("risk_usd", 100.0)),
+                                                "exit_price": float(exit_price),
+                                                "sweep_extreme": float(exit_price),
+                                                "exit_ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+                                            }
+                                            _save_pending_turtle_soup(pending_soup)
+                                            log.info("TURTLE_SOUP_ENQUEUED: ref=%s symbol=%s dir=%d SL=%.5f exit=%.5f (monitoring for inducement sweep re-entry)",
+                                                     ref_str, pos.get("symbol"), direction_val, sl_price_val, exit_price)
+                                except Exception as e:
+                                    log.warning("Failed to enqueue turtle soup for ref=%s: %s", ref, e)
                         else:
-                            classification = "breach"
+                            # Closed early before reaching full SL!
+                            hit = "early_sl"
+                            classification = "manual_loss_mitigated" if reason in (0, 1, 2) else "early_loss_mitigated"
+                    else:
+                        hit = "be"
+                        classification = "breakeven_flat"
 
-                        # Phase 2: Enqueue stopped-out trade for Turtle Soup / Inducement Sweep Re-Entry
-                        if getattr(config, "TURTLE_SOUP_REENTRY_ENABLED", True) and not str(ref).startswith("soup_"):
-                            try:
-                                pending_soup = _load_pending_turtle_soup()
-                                ref_str = str(ref)
-                                if ref_str not in pending_soup:
-                                    fill_price_val = float(pos.get("fill_price", 0.0))
-                                    sl_price_val = float(pos.get("sl", 0.0))
-                                    tp_price_val = float(pos.get("tp", 0.0))
-                                    sl_dist_val = abs(fill_price_val - sl_price_val)
-                                    direction_val = int(pos.get("direction", 1))
-                                    if sl_dist_val > 0 and tp_price_val > 0:
-                                        pending_soup[ref_str] = {
-                                            "ref": ref,
-                                            "symbol": pos.get("symbol"),
-                                            "direction": direction_val,
-                                            "original_entry": fill_price_val,
-                                            "original_sl": sl_price_val,
-                                            "original_tp": tp_price_val,
-                                            "sl_dist": sl_dist_val,
-                                            "risk_usd": float(pos.get("risk_usd", 100.0)),
-                                            "exit_price": float(exit_price),
-                                            "sweep_extreme": float(exit_price),
-                                            "exit_ts": dt.datetime.now(dt.timezone.utc).isoformat(),
-                                        }
-                                        _save_pending_turtle_soup(pending_soup)
-                                        log.info("TURTLE_SOUP_ENQUEUED: ref=%s symbol=%s dir=%d SL=%.5f exit=%.5f (monitoring for inducement sweep re-entry)",
-                                                 ref_str, pos.get("symbol"), direction_val, sl_price_val, exit_price)
-                            except Exception as e:
-                                log.warning("Failed to enqueue turtle soup for ref=%s: %s", ref, e)
-
-                    log.info("RECONCILE_VERIFIED: ref=%s ticket=%s closed in MT5. hit=%s pnl=%.2f exit=%.5f class=%s",
-                             ref, order_id, hit, pnl_raw, exit_price, classification)
+                    log.info("RECONCILE_VERIFIED: ref=%s ticket=%s closed in MT5. hit=%s pnl=%.2f exit=%.5f class=%s reason=%s",
+                             ref, order_id, hit, pnl_raw, exit_price, classification, reason)
                     ledger.record_outcome(ref, status="closed", hit=hit, exit_price=exit_price,
                                           pnl_usd=pnl_raw, classification=classification)
                     actions += 1
 
                     ref_disp = f"#{int(ref):04d}" if str(ref).isdigit() else f"#{ref}"
+                    broker_disp = pos.get("broker", "mt5")
+
+                    # Map exit reason to clear human-readable source
+                    if reason == 0:
+                        source_disp = "Desktop Terminal (Manual Close)"
+                    elif reason == 1:
+                        source_disp = "Mobile App (Manual Close)"
+                    elif reason == 2:
+                        source_disp = "Web Terminal (Manual Close)"
+                    elif reason == 3:
+                        source_disp = "Agent Automation Exit"
+                    elif reason == 4:
+                        source_disp = "Broker Stop-Loss Trigger"
+                    elif reason == 5:
+                        source_disp = "Broker Take-Profit Trigger"
+                    elif reason == 6:
+                        source_disp = "Margin Call / Stop-Out"
+                    else:
+                        source_disp = "Broker Execution"
+
                     if hit == "tp":
                         msg = (
                             f"🎯 <b>{pos.get('symbol')} — 100% TAKE PROFIT HIT!</b> 🏆\n"
@@ -744,7 +797,7 @@ def manage_open_positions(ledger) -> int:
                             f"<b>Target Reached:</b> {exit_price:.5f} (TP: {tp_val:.5f})\n"
                             f"<b>Realized P&L:</b> <b>+{pnl_raw:.2f} USD</b> (+{rr_val:.2f}R Full Target Banked)\n"
                             f"<b>Target Progress:</b> 100% Achieved!\n"
-                            f"<b>Broker:</b> {pos.get('broker', 'mt5')}\n"
+                            f"<b>Broker:</b> {broker_disp}\n"
                             f"{'─' * 28}\n"
                             f"🏆 <i>Full institutional target banked by GoldFX agent.</i>"
                         )
@@ -754,13 +807,14 @@ def manage_open_positions(ledger) -> int:
                             f"{'─' * 28}\n"
                             f"<b>Setup:</b> {ref_disp}\n"
                             f"<b>Exit Price:</b> {exit_price:.5f}\n"
-                            f"<b>Realized P&L:</b> <b>+{pnl_raw:.2f} USD</b> ({classification})\n"
+                            f"<b>Realized P&L:</b> <b>+{pnl_raw:.2f} USD</b> (+{realized_r:.2f}R Locked Gain)\n"
                             f"<b>Peak Progress:</b> +{peak_mfe:.2f}R\n"
-                            f"<b>Broker:</b> {pos.get('broker', 'mt5')}\n"
-                            f"{'─' * 28}"
+                            f"<b>Exit Source:</b> {source_disp}\n"
+                            f"<b>Broker:</b> {broker_disp}\n"
+                            f"{'─' * 28}\n"
+                            f"📈 <i>Trailing stop preserved trade gains before reversal.</i>"
                         )
                     elif hit == "be":
-                        peak_pct_tp = float(pos.get("peak_pct_tp", 0.0))
                         msg = (
                             f"🛡️⚪ <b>{pos.get('symbol')} — BREAKEVEN EXIT (PROTECTED)</b>\n"
                             f"{'─' * 28}\n"
@@ -770,21 +824,54 @@ def manage_open_positions(ledger) -> int:
                             f"<b>Peak Progress:</b> +{peak_mfe:.2f}R ({peak_pct_tp:.0f}% of target)\n"
                             f"<b>Status:</b> Price reversed after reaching Breakeven protection.\n"
                             f"<b>Protection Result:</b> <b>$0 Risk-Free Exit</b> (Full Stop Loss avoided!)\n"
-                            f"<b>Broker:</b> {pos.get('broker', 'mt5')}\n"
+                            f"<b>Broker:</b> {broker_disp}\n"
                             f"{'─' * 28}\n"
                             f"🛡️ <i>Capital protected by GoldFX Breakeven Shield.</i>"
                         )
+                    elif hit == "early_tp":
+                        msg = (
+                            f"💰 <b>{pos.get('symbol')} — EARLY PROFIT BANKED (CLOSED BEFORE TP)</b>\n"
+                            f"{'─' * 28}\n"
+                            f"<b>Setup:</b> {ref_disp}\n"
+                            f"<b>Exit Price:</b> {exit_price:.5f} (Target TP: {tp_val:.5f})\n"
+                            f"<b>Realized P&L:</b> <b>+{pnl_raw:.2f} USD</b> (+{realized_r:.2f}R Banked)\n"
+                            f"<b>Peak Progress:</b> +{peak_mfe:.2f}R ({peak_pct_tp:.0f}% to target)\n"
+                            f"<b>Exit Source:</b> {source_disp}\n"
+                            f"<b>Status:</b> Closed early before reaching full Take Profit.\n"
+                            f"<b>Broker:</b> {broker_disp}\n"
+                            f"{'─' * 28}\n"
+                            f"💰 <i>Discretionary profit secured & added to balance.</i>"
+                        )
+                    elif hit == "early_sl":
+                        saved_usd = max(0.0, risk_val - abs(pnl_raw))
+                        saved_r = max(0.0, 1.0 - abs(realized_r))
+                        msg = (
+                            f"⚠️ <b>{pos.get('symbol')} — EARLY EXIT / LOSS MITIGATED (CLOSED BEFORE SL)</b>\n"
+                            f"{'─' * 28}\n"
+                            f"<b>Setup:</b> {ref_disp}\n"
+                            f"<b>Exit Price:</b> {exit_price:.5f} (Original SL: {sl_val:.5f})\n"
+                            f"<b>Realized P&L:</b> <b>{pnl_raw:+.2f} USD</b> ({realized_r:.2f}R Loss)\n"
+                            f"<b>Capital Saved:</b> <b>+${saved_usd:.2f} USD</b> (+{saved_r:.2f}R Loss Mitigated!)\n"
+                            f"<b>Peak Progress:</b> +{peak_mfe:.2f}R\n"
+                            f"<b>Exit Source:</b> {source_disp}\n"
+                            f"<b>Status:</b> Closed early before price reached Stop Loss.\n"
+                            f"<b>Broker:</b> {broker_disp}\n"
+                            f"{'─' * 28}\n"
+                            f"🛡️ <i>Loss mitigated ahead of full Stop Loss.</i>"
+                        )
                     else:
                         msg = (
-                            f"🛑 <b>{pos.get('symbol')} — STOP LOSS HIT</b>\n"
+                            f"🛑 <b>{pos.get('symbol')} — STOP LOSS HIT (-1.00R)</b>\n"
                             f"{'─' * 28}\n"
                             f"<b>Setup:</b> {ref_disp}\n"
                             f"<b>Exit Price:</b> {exit_price:.5f} (SL: {sl_val:.5f})\n"
-                            f"<b>Realized P&L:</b> <b>{pnl_raw:+.2f} USD</b> (-1.00R)\n"
+                            f"<b>Realized P&L:</b> <b>{pnl_raw:+.2f} USD</b> ({realized_r:.2f}R)\n"
                             f"<b>Classification:</b> {classification}\n"
                             f"<b>Peak Progress:</b> +{peak_mfe:.2f}R\n"
-                            f"<b>Broker:</b> {pos.get('broker', 'mt5')}\n"
-                            f"{'─' * 28}"
+                            f"<b>Exit Source:</b> {source_disp}\n"
+                            f"<b>Broker:</b> {broker_disp}\n"
+                            f"{'─' * 28}\n"
+                            f"🛑 <i>Risk strictly managed at 1.00R maximum loss.</i>"
                         )
 
                     if CHAT_ID:

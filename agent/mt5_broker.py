@@ -435,11 +435,15 @@ class Mt5Broker:
                 return None
             for d in reversed(deals):
                 if d.entry in (1, 3) or d.profit != 0:
+                    net_profit = float(d.profit) + float(getattr(d, "swap", 0.0)) + float(getattr(d, "commission", 0.0)) + float(getattr(d, "fee", 0.0))
                     return {
                         "ticket": d.ticket,
                         "position_id": d.position_id,
                         "price": float(d.price),
-                        "profit": float(d.profit),
+                        "profit": net_profit,
+                        "gross_profit": float(d.profit),
+                        "swap": float(getattr(d, "swap", 0.0)),
+                        "commission": float(getattr(d, "commission", 0.0)),
                         "time": d.time,
                         "comment": getattr(d, "comment", ""),
                         "reason": getattr(d, "reason", 0),
