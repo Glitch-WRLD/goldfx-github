@@ -128,13 +128,13 @@ def load_state() -> dict:
 
 def save_state(s: dict) -> None:
     GHA_STATE_DIR.mkdir(exist_ok=True)
-    s["delivered"] = s["delivered"][-500:]
-    s["zones"] = s["zones"][-200:]
-    s["history"] = s["history"][:200]
+    s["delivered"] = s["delivered"][-2000:]
+    s["zones"] = s["zones"][-500:]
+    s["history"] = s["history"][:500]
     s.setdefault("outcomes", {})
     outstanding = [(k, v) for k, v in s["outcomes"].items()
                    if v.get("status") in ("pending", "posted")]
-    s["outcomes"] = dict(outstanding[-500:])
+    s["outcomes"] = dict(outstanding[-2000:])
     STATE_FILE.write_text(json.dumps(s, indent=1, sort_keys=True, default=str))
 
 
@@ -240,6 +240,43 @@ def scan_and_deliver(state: dict) -> None:
             key = f"{sym}:{sig.ts.isoformat()}"
             if key in delivered:
                 continue
+
+            # Guard 1: Maximum Signal Age Guard (never deliver signals > 30 minutes old)
+            now_utc = datetime.datetime.now(datetime.timezone.utc)
+            sig_ts_utc = sig.ts if getattr(sig.ts, "tzinfo", None) else sig.ts.replace(tzinfo=datetime.timezone.utc)
+            age_min = (now_utc - sig_ts_utc).total_seconds() / 60.0
+            if age_min > 30.0:
+                log.info("signal %s is stale (age %.1f min > 30 min); skipping delivery", key, age_min)
+                delivered.add(key)
+                continue
+
+            # Guard 2: Pre-Delivery Outcome Resolution Guard
+            # If price already hit TP or SL prior to delivery, never broadcast as a live setup!
+            try:
+                from data.tv_data import get_df
+                df_entry = get_df(sym, rt["entry_tf"], refresh=False)
+                if df_entry is not None and len(df_entry) > 0:
+                    import pandas as pd
+                    sig_idx = df_entry.index.get_indexer([pd.Timestamp(sig.ts)], method="nearest")[0]
+                    already_resolved = False
+                    for i in range(sig_idx + 1, len(df_entry)):
+                        hi = float(df_entry["high"].iloc[i])
+                        lo = float(df_entry["low"].iloc[i])
+                        if sig.direction == 1:
+                            if hi >= sig.take_profit or lo <= sig.stop:
+                                already_resolved = True
+                                break
+                        else:
+                            if lo <= sig.take_profit or hi >= sig.stop:
+                                already_resolved = True
+                                break
+                    if already_resolved:
+                        log.info("signal %s already reached TP/SL prior to delivery; skipping telegram send", key)
+                        delivered.add(key)
+                        continue
+            except Exception as pe:
+                log.debug("pre-delivery resolution check error for %s: %s", key, pe)
+
             if sent_this_tick >= MAX_SENDS_PER_TICK:
                 log.warning("send cap reached; %s queued for next tick", key)
                 continue
@@ -338,6 +375,24 @@ def check_outcomes(state: dict) -> int:
                 if hi >= sl: hit, when, ep = "sl", t, sl; break
         if hit is None:
             continue  # still running; wait for next tick
+
+        # Guard 3: Stale Outcome Guard
+        # If the TP/SL resolution occurred > 90 minutes ago, mark as posted without spamming Telegram
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        try:
+            when_ts = pd.Timestamp(when)
+            when_utc = when_ts.tz_convert("UTC") if when_ts.tzinfo else when_ts.tz_localize("UTC")
+            outcome_age_min = (now_utc - when_utc).total_seconds() / 60.0
+        except Exception:
+            outcome_age_min = 0.0
+
+        if outcome_age_min > 90.0:
+            log.info("outcome %s hit %s %.1f min ago (> 90 min); marking posted without telegram send",
+                     key, hit, outcome_age_min)
+            outcomes[key] = {"status": "posted", "hit": hit, "when": str(when),
+                             "price": ep, "ts": ts}
+            continue
+
         if sent >= MAX_SENDS_PER_TICK:
             outcomes[key] = {"status": "pending", "hit": hit, "when": str(when),
                              "price": ep, "ts": ts}
