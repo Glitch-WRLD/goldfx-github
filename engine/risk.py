@@ -99,23 +99,56 @@ class RiskManager:
 
 
 def position_size(symbol: str, risk_usd: float, sl_distance: float) -> float:
-    """lots = risk_$ / (sl_distance_per_point * value_per_point_per_lot)."""
-    c = config.CONTRACTS[symbol]
-    points = sl_distance / c["point"]
+    """lots = risk_$ / (sl_distance_per_point * value_per_point_per_lot).
+    Dynamically queries live broker tick size & value from MT5 memory if available.
+    """
+    if sl_distance <= 0 or risk_usd <= 0:
+        return 0.0
+
+    try:
+        import MetaTrader5 as mt5
+        info = mt5.symbol_info(symbol)
+        if info and info.trade_tick_size > 0 and info.trade_tick_value > 0:
+            loss_per_lot = (sl_distance / info.trade_tick_size) * info.trade_tick_value
+            if loss_per_lot > 0:
+                return risk_usd / loss_per_lot
+    except Exception:
+        pass
+
+    c = config.CONTRACTS.get(symbol, {})
+    point = c.get("point", 0.00001)
+    val = c.get("pip_value_per_lot_usd", 1.0)
+    points = sl_distance / point if point > 0 else 0.0
     if points <= 0:
         return 0.0
-    return risk_usd / (points * c["pip_value_per_lot_usd"])
+    return risk_usd / (points * val)
 
 
 def floor_lots(symbol: str, lots: float) -> float:
-    step = 0.01 if symbol == "EURUSD" else 0.01
+    step = 0.01
+    try:
+        import MetaTrader5 as mt5
+        info = mt5.symbol_info(symbol)
+        if info and info.volume_step > 0:
+            step = info.volume_step
+    except Exception:
+        pass
     lots = math.floor(max(lots, 0.0) / step) * step
     return round(lots, 2)
 
 
 def risk_amount(symbol: str, lots: float, sl_distance: float) -> float:
-    c = config.CONTRACTS[symbol]
-    return lots * (sl_distance / c["point"]) * c["pip_value_per_lot_usd"]
+    try:
+        import MetaTrader5 as mt5
+        info = mt5.symbol_info(symbol)
+        if info and info.trade_tick_size > 0 and info.trade_tick_value > 0:
+            return float(lots * (sl_distance / info.trade_tick_size) * info.trade_tick_value)
+    except Exception:
+        pass
+    c = config.CONTRACTS.get(symbol, {})
+    point = c.get("point", 0.00001)
+    val = c.get("pip_value_per_lot_usd", 1.0)
+    return lots * (sl_distance / point) * val
 
 
 def format_decimal(symbol: str, price: float) -> str:

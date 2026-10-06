@@ -78,7 +78,7 @@ CONTRACTS = {
     "EURUSD": {"point": 0.00001, "pip_value_per_lot_usd": 10.0 / 10, "digits": 5},
     "GBPUSD": {"point": 0.00001, "pip_value_per_lot_usd": 10.0 / 10, "digits": 5},
     "AUDUSD": {"point": 0.00001, "pip_value_per_lot_usd": 10.0 / 10, "digits": 5},
-    "USDJPY": {"point": 0.0001, "pip_value_per_lot_usd": 10.0 / 10, "digits": 3},
+    "USDJPY": {"point": 0.001, "pip_value_per_lot_usd": 6.32 / 10, "digits": 3},
     "USDCAD": {"point": 0.00001, "pip_value_per_lot_usd": 7.4 / 10, "digits": 5},
     "NZDUSD": {"point": 0.00001, "pip_value_per_lot_usd": 10.0 / 10, "digits": 5},
     "USDCHF": {"point": 0.00001, "pip_value_per_lot_usd": 11.0 / 10, "digits": 5},

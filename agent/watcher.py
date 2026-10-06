@@ -641,23 +641,52 @@ def manage_open_positions(ledger) -> int:
                 deal = ex.get_closed_deal(order_id) if hasattr(ex, "get_closed_deal") else None
                 if deal is not None:
                     # Verified closed by broker history!
+                    # Verified closed by broker history!
                     exit_price = deal.get("price", pos.get("fill_price", 0.0))
                     pnl_raw = deal.get("profit", 0.0)
                     comment = deal.get("comment", "").lower()
                     reason = deal.get("reason", 0)
                     sl_state = pos.get("sl_state", "initial")
                     peak_mfe = float(pos.get("peak_mfe_r", 0.0))
+                    fill_p = float(pos.get("fill_price", 0.0))
+                    tp_val = float(pos.get("tp", 0.0))
+                    sl_val = float(pos.get("sl", 0.0))
+                    risk_val = float(pos.get("risk_usd", 100.0))
+                    rr_val = float(pos.get("rr", 1.0))
+                    target_profit = risk_val * rr_val if rr_val > 0 else risk_val
+                    direction = int(pos.get("direction", 1))
 
-                    if sl_state == "trail_10":
-                        hit = "tp"
-                        classification = "broker_trailed_profit_10"
-                    elif sl_state == "trail_05":
-                        hit = "tp"
-                        classification = "broker_trailed_profit_05"
-                    elif reason == 5 or "[tp" in comment or pnl_raw > 0.5:
+                    # Accurate classification logic:
+                    # 1. Did it hit full intended Take Profit?
+                    is_full_tp = False
+                    if reason == 5 or "[tp" in comment:
+                        is_full_tp = True
+                    elif tp_val > 0:
+                        dist_to_tp = abs(exit_price - tp_val)
+                        target_span = abs(tp_val - fill_p)
+                        if target_span > 0 and (dist_to_tp / target_span) <= 0.10:
+                            is_full_tp = True
+                        elif target_profit > 0 and pnl_raw >= 0.50 * target_profit:
+                            is_full_tp = True
+
+                    # 2. Was it a Breakeven exit?
+                    is_be_exit = False
+                    if not is_full_tp:
+                        if sl_state == "be" or "[be" in comment:
+                            is_be_exit = True
+                        elif abs(pnl_raw) < 0.20 * risk_val and peak_mfe >= 0.5:
+                            is_be_exit = True
+
+                    if is_full_tp:
                         hit = "tp"
                         classification = "broker_tp"
-                    elif sl_state == "be" or "[be" in comment or abs(pnl_raw) < 1.0:
+                    elif sl_state == "trail_10":
+                        hit = "trail_tp"
+                        classification = "broker_trailed_profit_10"
+                    elif sl_state == "trail_05":
+                        hit = "trail_tp"
+                        classification = "broker_trailed_profit_05"
+                    elif is_be_exit:
                         hit = "be"
                         classification = "be_avoided_sl"
                     else:
@@ -700,22 +729,64 @@ def manage_open_positions(ledger) -> int:
                             except Exception as e:
                                 log.warning("Failed to enqueue turtle soup for ref=%s: %s", ref, e)
 
-
                     log.info("RECONCILE_VERIFIED: ref=%s ticket=%s closed in MT5. hit=%s pnl=%.2f exit=%.5f class=%s",
                              ref, order_id, hit, pnl_raw, exit_price, classification)
                     ledger.record_outcome(ref, status="closed", hit=hit, exit_price=exit_price,
                                           pnl_usd=pnl_raw, classification=classification)
                     actions += 1
 
-                    msg = (
-                        f"{'🎯' if hit == 'tp' else ('⚪' if hit == 'be' else '🛑')} {pos.get('symbol')} — {hit.upper()} (BROKER CLOSED)"
-                        f"\n{'─' * 26}"
-                        f"\nSetup #{ref} · Exit price {exit_price:.5f}"
-                        f"\nRealized P&L: {pnl_raw:+.2f} ({classification})"
-                        f"\nPeak MFE reached: +{peak_mfe:.2f}R"
-                        f"\nBroker: {pos.get('broker', 'mt5')}"
-                        f"\n{'─' * 26}"
-                    )
+                    ref_disp = f"#{int(ref):04d}" if str(ref).isdigit() else f"#{ref}"
+                    if hit == "tp":
+                        msg = (
+                            f"🎯 <b>{pos.get('symbol')} — 100% TAKE PROFIT HIT!</b> 🏆\n"
+                            f"{'─' * 28}\n"
+                            f"<b>Setup:</b> {ref_disp}\n"
+                            f"<b>Target Reached:</b> {exit_price:.5f} (TP: {tp_val:.5f})\n"
+                            f"<b>Realized P&L:</b> <b>+{pnl_raw:.2f} USD</b> (+{rr_val:.2f}R Full Target Banked)\n"
+                            f"<b>Target Progress:</b> 100% Achieved!\n"
+                            f"<b>Broker:</b> {pos.get('broker', 'mt5')}\n"
+                            f"{'─' * 28}\n"
+                            f"🏆 <i>Full institutional target banked by GoldFX agent.</i>"
+                        )
+                    elif hit == "trail_tp":
+                        msg = (
+                            f"📈 <b>{pos.get('symbol')} — TRAILING PROFIT BANKED</b>\n"
+                            f"{'─' * 28}\n"
+                            f"<b>Setup:</b> {ref_disp}\n"
+                            f"<b>Exit Price:</b> {exit_price:.5f}\n"
+                            f"<b>Realized P&L:</b> <b>+{pnl_raw:.2f} USD</b> ({classification})\n"
+                            f"<b>Peak Progress:</b> +{peak_mfe:.2f}R\n"
+                            f"<b>Broker:</b> {pos.get('broker', 'mt5')}\n"
+                            f"{'─' * 28}"
+                        )
+                    elif hit == "be":
+                        peak_pct_tp = float(pos.get("peak_pct_tp", 0.0))
+                        msg = (
+                            f"🛡️⚪ <b>{pos.get('symbol')} — BREAKEVEN EXIT (PROTECTED)</b>\n"
+                            f"{'─' * 28}\n"
+                            f"<b>Setup:</b> {ref_disp}\n"
+                            f"<b>Exit Price:</b> {exit_price:.5f} (Entry: {fill_p:.5f})\n"
+                            f"<b>Realized P&L:</b> <b>{pnl_raw:+.2f} USD</b> (+1 pip buffer banked)\n"
+                            f"<b>Peak Progress:</b> +{peak_mfe:.2f}R ({peak_pct_tp:.0f}% of target)\n"
+                            f"<b>Status:</b> Price reversed after reaching Breakeven protection.\n"
+                            f"<b>Protection Result:</b> <b>$0 Risk-Free Exit</b> (Full Stop Loss avoided!)\n"
+                            f"<b>Broker:</b> {pos.get('broker', 'mt5')}\n"
+                            f"{'─' * 28}\n"
+                            f"🛡️ <i>Capital protected by GoldFX Breakeven Shield.</i>"
+                        )
+                    else:
+                        msg = (
+                            f"🛑 <b>{pos.get('symbol')} — STOP LOSS HIT</b>\n"
+                            f"{'─' * 28}\n"
+                            f"<b>Setup:</b> {ref_disp}\n"
+                            f"<b>Exit Price:</b> {exit_price:.5f} (SL: {sl_val:.5f})\n"
+                            f"<b>Realized P&L:</b> <b>{pnl_raw:+.2f} USD</b> (-1.00R)\n"
+                            f"<b>Classification:</b> {classification}\n"
+                            f"<b>Peak Progress:</b> +{peak_mfe:.2f}R\n"
+                            f"<b>Broker:</b> {pos.get('broker', 'mt5')}\n"
+                            f"{'─' * 28}"
+                        )
+
                     if CHAT_ID:
                         send(CHAT_ID, msg)
                     continue
@@ -1037,22 +1108,39 @@ def manage_open_positions(ledger) -> int:
                     hit = "be"
                     pnl = 0.0
                     classification = "be_avoided_sl"
-                    icon = "\u26AA"
-                    title = "EXITED AT BREAKEVEN"
+                    icon = "🛡️⚪"
+                    title = "BREAKEVEN EXIT (PROTECTED)"
 
                 ledger.record_outcome(ref, status="closed", hit=hit,
                                       exit_price=sl_protected, pnl_usd=pnl,
                                       classification=classification)
                 actions += 1
-                msg = (
-                    f"{icon} {symbol} \u2014 {title}"
-                    f"\n{'\u2500' * 26}"
-                    f"\nSetup #{ref} \u00b7 Exited at {sl_protected:.5f}"
-                    f"\nP&L: {pnl:+.2f} USD \u00b7 Protected gain banked!"
-                    f"\nBroker: {pos.get('broker', 'mt5')}"
-                    f"\n{'\u2500' * 26}"
-                    f"\n\u26A0\ufe0f Auto-managed by GoldFX agent."
-                )
+
+                ref_disp = f"#{int(ref):04d}" if str(ref).isdigit() else f"#{ref}"
+                if hit == "be":
+                    peak_pct_tp = float(pos.get("peak_pct_tp", 0.0))
+                    peak_mfe_r = float(pos.get("peak_mfe_r", 0.0))
+                    msg = (
+                        f"🛡️⚪ <b>{symbol} — BREAKEVEN EXIT (PROTECTED)</b>\n"
+                        f"{'─' * 28}\n"
+                        f"Setup {ref_disp} · Closed at BE: {sl_protected:.5f} (Entry: {fill_price:.5f})\n"
+                        f"Realized P&L: <b>+$0.00 USD</b> (Risk-Free Shield)\n"
+                        f"Peak Progress: +{peak_mfe_r:.2f}R ({peak_pct_tp:.0f}% of target)\n"
+                        f"Status: Price reversed after reaching Breakeven protection.\n"
+                        f"Protection Result: <b>$0 Risk-Free Exit</b> (Full Stop Loss avoided!)\n"
+                        f"Broker: {pos.get('broker', 'mt5')}\n"
+                        f"{'─' * 28}\n"
+                        f"🛡️ <i>Capital protected by GoldFX Breakeven Shield.</i>"
+                    )
+                else:
+                    msg = (
+                        f"{icon} <b>{symbol} — {title}</b>\n"
+                        f"{'─' * 28}\n"
+                        f"Setup {ref_disp} · Exited at {sl_protected:.5f}\n"
+                        f"Realized P&L: <b>{pnl:+.2f} USD</b> · Protected gain banked!\n"
+                        f"Broker: {pos.get('broker', 'mt5')}\n"
+                        f"{'─' * 28}"
+                    )
                 if CHAT_ID:
                     send(CHAT_ID, msg)
                 log.info("EXITED_PROTECTED ref=%s %s @ %.5f (%s, pnl=$%.2f)",
