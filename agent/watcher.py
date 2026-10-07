@@ -1618,9 +1618,10 @@ def process_pending_turtle_soup(ledger) -> int:
             continue
 
         # 3. Triggered! Check portfolio capacity & risk limits
-        allowed, reason_cap = rm.can_open_trade(symbol)
-        if not allowed:
-            log.warning("TURTLE_SOUP_CAP_BLOCKED: ref=%s %s %s — holding in queue", ref_key, symbol, reason_cap)
+        open_sym_count = len([e for e in ledger.open_entries().values() if e.get("symbol") == symbol])
+        if open_sym_count >= getattr(config, "MAX_TOTAL_PER_SYMBOL", 3):
+            log.warning("TURTLE_SOUP_CAP_BLOCKED: ref=%s %s symbol concentration full (%d open) — holding in queue",
+                        ref_key, symbol, open_sym_count)
             still_pending[ref_key] = item
             continue
 
@@ -1857,10 +1858,10 @@ def _execute_setup_entry(
     )
     current_unprotected_risk_pct = (unprotected_risk_usd / rm.balance * 100.0) if rm.balance > 0 else 0.0
 
-    # Dynamic Headroom sizing
+    # Dynamic Headroom sizing: scale risk down to remaining headroom rather than skipping prematurely
     remaining_risk_pct = max_portfolio_risk_pct - current_unprotected_risk_pct
-    if remaining_risk_pct < 2.5:
-        log.info("skip %s ref=%s — portfolio risk limit reached (open risk %.1f%% / max %.1f%%, headroom %.1f%% < 2.5%%)",
+    if remaining_risk_pct < 1.0:
+        log.info("skip %s ref=%s — portfolio risk limit reached (open risk %.1f%% / max %.1f%%, headroom %.1f%% < 1.0%%)",
                  symbol, ref_key, current_unprotected_risk_pct, max_portfolio_risk_pct, remaining_risk_pct)
         return False, active_open_count, at_risk_count
 
