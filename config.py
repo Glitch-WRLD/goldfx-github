@@ -116,10 +116,10 @@ AGENT_STATE_URL = os.getenv(
 # ---- Portfolio Exposure & Risk Budgeting ----
 MAX_CONCURRENT_TRADES   = int(os.getenv("MAX_CONCURRENT_TRADES", "20"))         # max total open trades across all pairs & indices
 MAX_AT_RISK_TRADES      = int(os.getenv("MAX_AT_RISK_TRADES", "12"))            # max trades with capital actively at risk (< BE)
-MAX_TRADES_PER_SYMBOL   = int(os.getenv("MAX_TRADES_PER_SYMBOL", "1"))          # max 1 concurrent at-risk trade on single symbol
-MAX_AT_RISK_PER_SYMBOL  = int(os.getenv("MAX_AT_RISK_PER_SYMBOL", "1"))        # strictly 1 unhedged trade per symbol (< BE); prior MUST reach BE before 2nd opens
-MAX_TOTAL_PER_SYMBOL    = int(os.getenv("MAX_TOTAL_PER_SYMBOL", "3"))          # max total trades on single symbol (allows runners if prior are at BE)
-MAX_PORTFOLIO_RISK_PCT  = float(os.getenv("MAX_PORTFOLIO_RISK_PCT", "65.0"))   # max cumulative unprotected risk % (accommodates multi-pair diversification)
+MAX_TRADES_PER_SYMBOL   = int(os.getenv("MAX_TRADES_PER_SYMBOL", "3"))          # max concurrent at-risk trades on single symbol
+MAX_AT_RISK_PER_SYMBOL  = int(os.getenv("MAX_AT_RISK_PER_SYMBOL", "3"))        # max 3 unhedged trades per symbol (< BE) as designed
+MAX_TOTAL_PER_SYMBOL    = int(os.getenv("MAX_TOTAL_PER_SYMBOL", "5"))          # max total trades on single symbol (allows runners if prior are at BE)
+MAX_PORTFOLIO_RISK_PCT  = float(os.getenv("MAX_PORTFOLIO_RISK_PCT", "65.0"))   # max cumulative unprotected risk % (accommodates high-capacity)
 LOCAL_TP_GUARD_ENABLED = os.getenv("LOCAL_TP_GUARD_ENABLED", "1") == "1"     # close immediately if chart price touches TP
 MAX_SPREAD_PIPS = float(os.getenv("MAX_SPREAD_PIPS", "2.5"))                 # max FX spread (pips) for market entry
 MAX_SPREAD_GOLD = float(os.getenv("MAX_SPREAD_GOLD", "1.50"))          # max XAUUSD spread ($) for market entry
@@ -129,20 +129,20 @@ ROLLOVER_MIN_MARGIN_LEVEL_PCT = float(os.getenv("ROLLOVER_MIN_MARGIN_LEVEL_PCT",
 # ---- Account-Size Tiered Trade Capacity ----
 def dynamic_portfolio_capacity(balance: float, is_cent: bool = False) -> tuple[int, int, int, float, str]:
     """Return (max_total_trades, max_at_risk_trades, max_trades_per_sym, max_portfolio_risk_pct, tier_name):
-    - Cent Accounts: Run on Tier 3 High-Capacity (20 Total Max, 12 At-Risk Max, 1/Pair At-Risk, 3/Pair Total, 65% max open risk)
+    - Cent Accounts: Run on Tier 3 High-Capacity (20 Total Max, 12 At-Risk Max, 3/Pair At-Risk, 5/Pair Total, 65% max open risk)
     - Standard Accounts < $50:  6 Total Max, 4 At-Risk Max, 1/Pair At-Risk, 2/Pair Total, 35% max open risk (Tier 1: Small Balance)
-    - Standard Accounts $50-$500: 10 Total Max, 6 At-Risk Max, 1/Pair At-Risk, 2/Pair Total, 50% max open risk (Tier 2: Mid Balance)
-    - Standard Accounts $500+:  20 Total Max, 12 At-Risk Max, 1/Pair At-Risk, 3/Pair Total, 65% max open risk (Tier 3: High Capacity)
+    - Standard Accounts $50-$500: 10 Total Max, 6 At-Risk Max, 2/Pair At-Risk, 3/Pair Total, 50% max open risk (Tier 2: Mid Balance)
+    - Standard Accounts $500+:  20 Total Max, 12 At-Risk Max, 3/Pair At-Risk, 5/Pair Total, 65% max open risk (Tier 3: High Capacity)
     """
     if is_cent:
-        return 20, 12, 1, 65.0, f"Cent Account Tier 3 High-Capacity (Micro-Scale: {balance:.0f} USC · 20 Total / 12 At-Risk Max · 1/Pair At-Risk · 3/Pair Total)"
+        return 20, 12, 3, 65.0, f"Cent Account Tier 3 High-Capacity (Micro-Scale: {balance:.0f} USC · 20 Total / 12 At-Risk Max · 3/Pair At-Risk · 5/Pair Total)"
 
     if balance < 50.0:
         return 6, 4, 1, 35.0, f"Tier 1 (<$50 Standard · ${balance:.2f} · 6 Total / 4 At-Risk Max · 1/Pair)"
     elif balance < 500.0:
-        return 10, 6, 1, 50.0, f"Tier 2 ($50-$500 Standard · ${balance:.2f} · 10 Total / 6 At-Risk Max · 1/Pair)"
+        return 10, 6, 2, 50.0, f"Tier 2 ($50-$500 Standard · ${balance:.2f} · 10 Total / 6 At-Risk Max · 2/Pair)"
     else:
-        return 20, 12, 1, 65.0, f"Tier 3 ($500+ Standard · ${balance:.2f} · 20 Total / 12 At-Risk Max · 1/Pair At-Risk · 3/Pair Total)"
+        return 20, 12, 3, 65.0, f"Tier 3 ($500+ Standard · ${balance:.2f} · 20 Total / 12 At-Risk Max · 3/Pair At-Risk · 5/Pair Total)"
 
 # ---- Smart Reversal Early Exit (Disabled: Let Winners Run to Full TP) ----
 GOLD_REVERSAL_EXIT_ENABLED = os.getenv("GOLD_REVERSAL_EXIT_ENABLED", "0") == "1"
