@@ -180,6 +180,7 @@
   "USDCHF:2026-10-02T05:00:00+00:00",
   "USDCHF:2026-10-05T03:00:00+00:00",
   "USDCHF:2026-10-06T02:00:00+00:00",
+  "USDCHF:2026-10-07T01:00:00+00:00",
   "USDJPY:2026-10-02T16:00:00+00:00",
   "USDJPY:2026-10-05T08:25:00+00:00",
   "USDJPY:2026-10-05T08:30:00+00:00",
@@ -268,6 +269,20 @@
   "XAUUSD:2026-10-06T12:00:00+00:00"
  ],
  "history": [
+  {
+   "dir": "LONG",
+   "entry": 0.83275,
+   "profile": "balanced",
+   "ref": 231,
+   "rr": 1.81,
+   "sl": 0.8318782429447629,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "USDCHF",
+   "tf": "H1",
+   "tp": 0.8343304598773319,
+   "ts": "2026-10-07T01:00:00+00:00"
+  },
   {
    "dir": "LONG",
    "entry": 158.452,
@@ -4883,6 +4898,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 230,
+ "ref_seq": 231,
  "zones": []
 }
