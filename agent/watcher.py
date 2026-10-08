@@ -1626,7 +1626,7 @@ def process_pending_turtle_soup(ledger) -> int:
             continue
 
         soup_label = f"soup_{ref_key}"
-        if hasattr(ex, "has_position_with_ref") and ex.has_position_with_ref(symbol, soup_label):
+        if hasattr(ex, "has_position_with_ref") and ex.has_position_with_ref(soup_label):
             log.info("TURTLE_SOUP_ALREADY_OPEN: ref=%s %s %s already active in MT5", ref_key, symbol, soup_label)
             continue
 

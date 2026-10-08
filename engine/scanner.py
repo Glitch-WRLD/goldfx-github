@@ -712,7 +712,7 @@ class FVGScanner:
                 if h1_bull and is_bull_gap and body_disp:
                     gap = max(0.0, (b2["low"] - b0["high"])) / pt_div
                     if gap >= min_gap_pts or (b2["close"] - max(b0["open"], b0["close"])) / pt_div >= min_gap_pts * 2:
-                        entry = float(b2["low"])
+                        entry = float(b2["close"])
                         sl = float(b1["low"]) - (1.5 * point)
                         sl_dist = abs(entry - sl)
                         if sl_dist > 0:
@@ -751,7 +751,7 @@ class FVGScanner:
                 if (not h1_bull) and is_bear_gap and body_disp_bear:
                     gap = max(0.0, (b0["low"] - b2["high"])) / pt_div
                     if gap >= min_gap_pts or (min(b0["open"], b0["close"]) - b2["close"]) / pt_div >= min_gap_pts * 2:
-                        entry = float(b2["high"])
+                        entry = float(b2["close"])
                         sl = float(b1["high"]) + (1.5 * point)
                         sl_dist = abs(entry - sl)
                         if sl_dist > 0:
