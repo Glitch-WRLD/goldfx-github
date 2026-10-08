@@ -677,7 +677,8 @@ class FVGScanner:
 
             h1_ema = df_h1["close"].ewm(span=50).mean()
             point = 0.01 if "JPY" in symbol or symbol == "XAUUSD" or any(x in symbol for x in ["100", "500", "30"]) else 0.0001
-            pt_div = 0.01 if symbol in ["XAUUSD", "DJ30"] else point
+            pt_div = 1.0 if any(x in symbol for x in ["100", "500", "30"]) else (0.01 if symbol == "XAUUSD" else point)
+            wick_tol = 3.0 if symbol in ["DJ30", "NASDAQ-100"] else (0.35 if symbol == "XAUUSD" else (0.75 if symbol == "US500" else 1.5 * point))
 
             sub_m5 = df_m5.iloc[-max(lookback * 3, 120):].copy()
             last_closed_idx = len(sub_m5) - 2
@@ -705,10 +706,12 @@ class FVGScanner:
                 b1 = sub_m5.iloc[i-1]
                 b2 = sub_m5.iloc[i]
 
-                # Bullish ISDE Setup
-                if h1_bull and b2["low"] > b0["high"]:
-                    gap = (b2["low"] - b0["high"]) / pt_div
-                    if gap >= min_gap_pts:
+                # Bullish ISDE Setup (tolerates broker micro-wick variance when displacement is present)
+                is_bull_gap = (b2["low"] >= b0["high"] - wick_tol)
+                body_disp = (b2["close"] > max(b0["open"], b0["close"])) and (b1["close"] > b1["open"])
+                if h1_bull and is_bull_gap and body_disp:
+                    gap = max(0.0, (b2["low"] - b0["high"])) / pt_div
+                    if gap >= min_gap_pts or (b2["close"] - max(b0["open"], b0["close"])) / pt_div >= min_gap_pts * 2:
                         entry = float(b2["low"])
                         sl = float(b1["low"]) - (1.5 * point)
                         sl_dist = abs(entry - sl)
@@ -742,10 +745,12 @@ class FVGScanner:
                                 )
                                 out.append(sig)
 
-                # Bearish ISDE Setup
-                elif (not h1_bull) and b0["low"] > b2["high"]:
-                    gap = (b0["low"] - b2["high"]) / pt_div
-                    if gap >= min_gap_pts:
+                # Bearish ISDE Setup (tolerates broker micro-wick variance when displacement is present)
+                is_bear_gap = (b0["low"] >= b2["high"] - wick_tol)
+                body_disp_bear = (b2["close"] < min(b0["open"], b0["close"])) and (b1["close"] < b1["open"])
+                if (not h1_bull) and is_bear_gap and body_disp_bear:
+                    gap = max(0.0, (b0["low"] - b2["high"])) / pt_div
+                    if gap >= min_gap_pts or (min(b0["open"], b0["close"]) - b2["close"]) / pt_div >= min_gap_pts * 2:
                         entry = float(b2["high"])
                         sl = float(b1["high"]) + (1.5 * point)
                         sl_dist = abs(entry - sl)

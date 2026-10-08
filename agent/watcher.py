@@ -2032,7 +2032,8 @@ def _execute_setup_entry(
             is_too_slipped = slippage > max_slip
             slip_str = f"${slippage:.2f} > max ${max_slip:.2f}"
         elif is_index_sym:
-            max_slip = float(getattr(config, "MAX_ENTRY_SLIPPAGE_INDEX", 15.0))
+            index_slip_map = {"DJ30": 60.0, "NASDAQ-100": 35.0, "US500": 15.0}
+            max_slip = index_slip_map.get(symbol, float(getattr(config, "MAX_ENTRY_SLIPPAGE_INDEX", 25.0)))
             is_too_slipped = slippage > max_slip
             slip_str = f"{slippage:.1f} pts > max {max_slip:.1f} pts"
         else:
@@ -2183,6 +2184,12 @@ def _execute_setup_entry(
             ledger.record_outcome(ref_key, status="quarantined", hit="gold_standard_entry_quarantined",
                                   pnl_usd=0.0, classification="gold_requires_sniper")
             return False, active_open_count, at_risk_count
+
+    # For remote index setups, re-anchor SL and TP from live market price (cur)
+    # using the delivered SL and TP distance to preserve exact risk:reward across broker feeds!
+    if not is_local_scan and symbol in getattr(config, "INDEX_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"}):
+        sl = cur - (direction * orig_sl_dist)
+        tp = cur + (direction * orig_tp_dist)
 
     # Dynamic Sizing based on ACTUAL LIVE MARKET PRICE (cur)
     actual_sl_dist = abs(cur - sl)
