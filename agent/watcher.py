@@ -2191,6 +2191,18 @@ def _execute_setup_entry(
         sl = cur - (direction * orig_sl_dist)
         tp = cur + (direction * orig_tp_dist)
 
+    # For ISDE precision session setups, re-anchor TP from live market execution price (cur)
+    # using the strategy's target RR (constant 1:2.0) to ensure wins always pay out full 2.0R ($2 x risk_usd)
+    # and prevent theoretical entry displacement from compressing realized TP to < 1.0R!
+    is_isde_setup = entry.get("strategy_type") == "isde_session" or "ISDE" in str(entry.get("strategy_badge", ""))
+    if is_isde_setup:
+        target_rr = float(entry.get("rr", getattr(config, "ISDE_TARGET_RR", 2.0)))
+        live_sl_dist = abs(cur - sl)
+        if live_sl_dist > 0:
+            c = config.CONTRACTS.get(symbol, {})
+            digits = c.get("digits", 5 if "JPY" not in symbol and symbol != "XAUUSD" else 2)
+            tp = round(cur + (direction * target_rr * live_sl_dist), digits)
+
     # Dynamic Sizing based on ACTUAL LIVE MARKET PRICE (cur)
     actual_sl_dist = abs(cur - sl)
     actual_tp_dist = abs(tp - cur)
@@ -2407,7 +2419,7 @@ def scan_local_mt5_setups(
                     "is_local_scan": True,
                 }
 
-                log.info("LOCAL_SCANNER_DETECT: %s %s @ %.5f (ref #%d, ts=%s, strat=%s)",
+                log.info("LOCAL_SCANNER_DETECT: %s %s @ %.5f (ref #%s, ts=%s, strat=%s)",
                          symbol, entry_dict["dir"], sig.entry, next_ref, sig_ts_iso, entry_dict["strategy_type"])
 
                 fired, active_open_count, at_risk_count = _execute_setup_entry(
@@ -2482,7 +2494,7 @@ def scan_local_mt5_setups(
                         "is_local_scan": True,
                     }
 
-                    log.info("LOCAL_ISDE_DETECT: %s %s @ %.5f (ref #%d, ts=%s, tf=M5)",
+                    log.info("LOCAL_ISDE_DETECT: %s %s @ %.5f (ref #%s, ts=%s, tf=M5)",
                              symbol, entry_dict["dir"], sig.entry, next_ref, sig_ts_iso)
 
                     fired, active_open_count, at_risk_count = _execute_setup_entry(
