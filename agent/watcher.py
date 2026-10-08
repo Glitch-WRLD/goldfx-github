@@ -1745,12 +1745,24 @@ def _execute_setup_entry(
     Returns (fired: bool, active_open_count: int, at_risk_count: int).
     """
     ref_key = _to_ref_key(entry)
-    if ledger.has(ref_key):
-        return False, active_open_count, at_risk_count
-
     symbol = entry.get("symbol", "")
     direction = _entry_dir(entry)
     signal_ts = str(entry.get("ts", ""))
+
+    # Duplicate & Collision check in local ledger
+    if ledger.has(ref_key):
+        existing = ledger.get(ref_key) or {}
+        existing_sym = existing.get("symbol")
+        # If existing has matching symbol (or no symbol set but matching signal_ts):
+        if existing_sym == symbol or (not existing_sym and (not signal_ts or existing.get("signal_ts") == signal_ts)):
+            return False, active_open_count, at_risk_count
+        elif existing_sym and existing_sym != symbol:
+            # Sequence ID collision between local scan and remote delivery bot!
+            log.warning("REF_COLLISION_RESOLVED: ref=%s occupied by %s, disambiguating for %s",
+                        ref_key, existing_sym, symbol)
+            ref_key = f"{ref_key}_{symbol}"
+            if ledger.has(ref_key):
+                return False, active_open_count, at_risk_count
 
     # Duplicate check: setup with identical symbol and signal_ts already in ledger
     if signal_ts and any(pos.get("symbol") == symbol and str(pos.get("signal_ts")) == signal_ts for pos in ledger.data.values()):
@@ -1764,18 +1776,22 @@ def _execute_setup_entry(
                     symbol, ref_key)
         return False, active_open_count, at_risk_count
 
-    # Remote GHA Stale Signal Guard: Reject setups older than MAX_SIGNAL_AGE_MIN (e.g. delayed GHA cron)
+    # Remote GHA Stale Signal Guard: Reject setups older than MAX_SIGNAL_AGE_MIN after CANDLE CLOSE
     if not is_local_scan and signal_ts:
         try:
             sig_dt = dt.datetime.fromisoformat(signal_ts.replace("Z", "+00:00"))
+            tf = str(entry.get("tf", "M15")).upper()
+            tf_mins = 5 if tf == "M5" else (15 if tf == "M15" else (30 if tf == "M30" else (60 if tf == "H1" else (120 if tf == "H2" else (240 if tf == "H4" else (1440 if tf == "D1" else 15))))))
+            candle_close_dt = sig_dt + dt.timedelta(minutes=tf_mins)
             now_utc = dt.datetime.now(dt.timezone.utc)
-            age_min = (now_utc - sig_dt).total_seconds() / 60.0
-            max_age_min = float(getattr(config, "MAX_SIGNAL_AGE_MIN", 15.0))
+            age_min = max(0.0, (now_utc - candle_close_dt).total_seconds() / 60.0)
+            max_age_min = float(getattr(config, "MAX_SIGNAL_AGE_MIN", 45.0))
             if age_min > max_age_min:
-                log.info("skip %s ref=%s — signal age %.1fm exceeds max allowed %.1fm (GHA cron delay). Entry aborted.",
+                log.info("skip %s ref=%s — signal age %.1fm after candle close exceeds max allowed %.1fm (GHA cron delay). Entry aborted.",
                          symbol, ref_key, age_min, max_age_min)
                 ledger.record_outcome(ref_key, status="skipped", hit="stale_signal_age",
-                                      pnl_usd=0.0, classification="stale_signal_delayed")
+                                      pnl_usd=0.0, classification="stale_signal_delayed",
+                                      symbol=symbol, signal_ts=signal_ts)
                 return False, active_open_count, at_risk_count
         except Exception as te:
             log.debug("signal_ts parse error for ref=%s: %s", ref_key, te)
@@ -1789,7 +1805,8 @@ def _execute_setup_entry(
             log.info("skip %s ref=%s — already concluded in outcomes as %s before execution",
                      symbol, ref_key, hit_type)
             ledger.record_outcome(ref_key, status="skipped", hit=f"pre_entry_{hit_type}",
-                                  pnl_usd=0.0, classification=f"already_concluded_{hit_type}")
+                                  pnl_usd=0.0, classification=f"already_concluded_{hit_type}",
+                                  symbol=symbol, signal_ts=signal_ts)
             return False, active_open_count, at_risk_count
 
     # Dynamic Portfolio Capacity calculation
@@ -1880,14 +1897,16 @@ def _execute_setup_entry(
                  symbol, ref_key, getattr(config, "ROLLOVER_START_UTC", "20:55"), getattr(config, "ROLLOVER_END_UTC", "22:15"))
         return False, active_open_count, at_risk_count
 
-    # US Open Opening Bell Cooldown Check
-    if _is_us_open_cooldown(symbol):
+    is_isde = entry.get("strategy_type") == "isde_session" or "ISDE" in str(entry.get("strategy_badge", ""))
+
+    # US Open Opening Bell Cooldown Check (exempts ISDE session delivery)
+    if not is_isde and _is_us_open_cooldown(symbol):
         log.info("skip %s ref=%s — US Open opening bell volatility cooldown active (13:25 - 13:45 UTC). New entries paused.",
                  symbol, ref_key)
         return False, active_open_count, at_risk_count
 
-    # London Open Opening Bell Cooldown Check
-    if _is_london_open_cooldown(symbol):
+    # London Open Opening Bell Cooldown Check (exempts ISDE session delivery)
+    if not is_isde and _is_london_open_cooldown(symbol):
         log.info("skip %s ref=%s — London Open opening bell volatility cooldown active (06:50 - 07:20 UTC). Pausing entries during European cash open purge.",
                  symbol, ref_key)
         return False, active_open_count, at_risk_count
@@ -1970,7 +1989,8 @@ def _execute_setup_entry(
         log.info("skip %s ref=%s — SL already breached (cur %.5f, sl %.5f)",
                  symbol, ref_key, cur, sl)
         ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_sl_breached",
-                              pnl_usd=0.0, classification="sl_already_breached")
+                              pnl_usd=0.0, classification="sl_already_breached",
+                              symbol=symbol, signal_ts=signal_ts)
         msg = (
             f"🛑 {symbol} — SETUP #{ref_key} SKIPPED (SL BREACHED)\n"
             f"{'─' * 26}\n"
@@ -1987,7 +2007,8 @@ def _execute_setup_entry(
         log.info("skip %s ref=%s — TP already reached (cur %.5f, tp %.5f)",
                  symbol, ref_key, cur, tp)
         ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_tp_reached",
-                              pnl_usd=0.0, classification="tp_already_reached")
+                              pnl_usd=0.0, classification="tp_already_reached",
+                              symbol=symbol, signal_ts=signal_ts)
         msg = (
             f"🎯 {symbol} — SETUP #{ref_key} SKIPPED (TARGET REACHED)\n"
             f"{'─' * 26}\n"
@@ -2028,7 +2049,8 @@ def _execute_setup_entry(
             log.info("skip %s ref=%s — entry slippage too high (%s). Execution aborted.",
                      symbol, ref_key, slip_str)
             ledger.record_outcome(ref_key, status="skipped", hit="entry_slippage_exceeded",
-                                  pnl_usd=0.0, classification="entry_slippage_chased")
+                                  pnl_usd=0.0, classification="entry_slippage_chased",
+                                  symbol=symbol, signal_ts=signal_ts)
             return False, active_open_count, at_risk_count
 
     # Check C: Adverse drift check (price fell too far towards SL)
@@ -2040,7 +2062,8 @@ def _execute_setup_entry(
         log.info("skip %s ref=%s — price drifted too far adverse from entry zone (cur %.5f, entry %.5f, adverse %.5f)",
                  symbol, ref_key, cur, entry_price, adverse_dist)
         ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_adverse_drift",
-                              pnl_usd=0.0, classification="adverse_drift_exceeded")
+                              pnl_usd=0.0, classification="adverse_drift_exceeded",
+                              symbol=symbol, signal_ts=signal_ts)
         msg = (
             f"⚠️ {symbol} — SETUP #{ref_key} SKIPPED (ADVERSE DRIFT)\n"
             f"{'─' * 26}\n"
@@ -2353,11 +2376,13 @@ def scan_local_mt5_setups(
                 if any(item.get("symbol") == symbol and str(item.get("signal_ts")) == sig_ts_iso for item in pending_retrace.values()):
                     continue
 
-                # Compute next setup ref number
+                # Compute next setup ref number with local scanner prefix "L" to prevent namespace collisions
+                local_refs = [int(str(k)[1:]) for k in ledger.data.keys() if str(k).startswith("L") and str(k)[1:].isdigit()]
                 max_ledger_ref = max([int(k) for k in ledger.data.keys() if str(k).isdigit()] or [180])
                 state = fetch_state()
                 max_state_ref = int(state.get("ref_seq", 180)) if isinstance(state.get("ref_seq"), (int, str)) and str(state.get("ref_seq")).isdigit() else 180
-                next_ref = max(max_ledger_ref, max_state_ref) + 1
+                next_seq = max(max_ledger_ref, max_state_ref, *(local_refs or [180])) + 1
+                next_ref = f"L{next_seq}"
 
                 entry_dict = {
                     "symbol": symbol,
@@ -2426,10 +2451,13 @@ def scan_local_mt5_setups(
                     if any(item.get("symbol") == symbol and str(item.get("signal_ts")) == sig_ts_iso for item in pending_retrace.values()):
                         continue
 
+                    # Compute next setup ref number with local scanner prefix "L" to prevent namespace collisions
+                    local_refs = [int(str(k)[1:]) for k in ledger.data.keys() if str(k).startswith("L") and str(k)[1:].isdigit()]
                     max_ledger_ref = max([int(k) for k in ledger.data.keys() if str(k).isdigit()] or [180])
                     state = fetch_state()
                     max_state_ref = int(state.get("ref_seq", 180)) if isinstance(state.get("ref_seq"), (int, str)) and str(state.get("ref_seq")).isdigit() else 180
-                    next_ref = max(max_ledger_ref, max_state_ref) + 1
+                    next_seq = max(max_ledger_ref, max_state_ref, *(local_refs or [180])) + 1
+                    next_ref = f"L{next_seq}"
 
                     entry_dict = {
                         "symbol": symbol,

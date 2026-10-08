@@ -48,8 +48,12 @@ class Ledger:
         }
         self.save()
 
+    def get(self, ref) -> dict | None:
+        return self.data.get(str(ref))
+
     def record_outcome(self, ref, status: str, hit: str = "", exit_price: float = 0.0,
-                       pnl_usd: float | None = None, classification: str = "") -> None:
+                       pnl_usd: float | None = None, classification: str = "",
+                       symbol: str = "", signal_ts: str = "") -> None:
         k = str(ref)
         if k not in self.data:
             self.data[k] = {"ref": ref}
@@ -60,6 +64,10 @@ class Ledger:
             self.data[k]["pnl_usd"] = round(pnl_usd, 2)
         if classification:
             self.data[k]["classification"] = classification
+        if symbol and not self.data[k].get("symbol"):
+            self.data[k]["symbol"] = symbol
+        if signal_ts and not self.data[k].get("signal_ts"):
+            self.data[k]["signal_ts"] = signal_ts
         self.data[k]["closed_ts"] = dt.datetime.now(dt.timezone.utc).isoformat()
         self.save()
 
