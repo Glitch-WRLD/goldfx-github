@@ -114,6 +114,7 @@
   "GBPUSD:2026-10-08T14:35:00+00:00",
   "GBPUSD:2026-10-09T04:00:00+00:00",
   "GBPUSD:2026-10-09T12:00:00+00:00",
+  "GBPUSD:2026-10-09T14:25:00+00:00",
   "NASDAQ-100:2026-09-30T07:45:00+00:00",
   "NASDAQ-100:2026-09-30T09:15:00+00:00",
   "NASDAQ-100:2026-09-30T23:15:00+00:00",
@@ -350,6 +351,20 @@
   "XAUUSD:2026-10-09T08:15:00+00:00"
  ],
  "history": [
+  {
+   "dir": "LONG",
+   "entry": 1.32302,
+   "profile": "balanced",
+   "ref": 313,
+   "rr": 2.0,
+   "sl": 1.32249,
+   "strategy_badge": "\ud83c\udfaf ISDE Session Delivery",
+   "strategy_type": "isde_session",
+   "symbol": "GBPUSD",
+   "tf": "M5",
+   "tp": 1.3240800000000004,
+   "ts": "2026-10-09T14:25:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 1.322,
@@ -6715,6 +6730,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 312,
+ "ref_seq": 313,
  "zones": []
 }
