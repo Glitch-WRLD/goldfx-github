@@ -150,10 +150,10 @@ GOLD_REVERSAL_MIN_MFE_R    = float(os.getenv("GOLD_REVERSAL_MIN_MFE_R", "0.5"))
 GOLD_REVERSAL_TF           = os.getenv("GOLD_REVERSAL_TF", "M15")
 
 # ---- Trade Protection: Maintain 0.8R Breakeven, Disable Trailing Stops (Let Winners Run to 100% TP) ----
-BREAKEVEN_ENABLED          = os.getenv("BREAKEVEN_ENABLED", "1") == "1"       # Stage 1: Move SL to BE (+1 pip) when price reaches >= 50% TP / 0.8R
-BREAKEVEN_PCT_TP           = float(os.getenv("BREAKEVEN_PCT_TP", "50.0"))     # Stage 1: Move SL to BE (+1 pip) when price reaches >= 50% of TP
+BREAKEVEN_ENABLED          = os.getenv("BREAKEVEN_ENABLED", "1") == "1"       # Stage 1: Move SL to BE (+1 pip) when price reaches >= 65% TP / 1.0R
+BREAKEVEN_PCT_TP           = float(os.getenv("BREAKEVEN_PCT_TP", "65.0"))     # Stage 1: Move SL to BE (+1 pip) when price reaches >= 65% of TP (allows winners room to run)
 BREAKEVEN_PCT_TP_GBPAUD    = float(os.getenv("BREAKEVEN_PCT_TP_GBPAUD", "70.0")) # Stage 1 GBPAUD: Wider BE buffer (70% TP) for deep SMC inducement retests
-BREAKEVEN_MFE_R            = float(os.getenv("BREAKEVEN_MFE_R", "0.8"))      # Stage 1: Move SL to BE (+1 pip buffer) at >= 0.8R
+BREAKEVEN_MFE_R            = float(os.getenv("BREAKEVEN_MFE_R", "1.0"))      # Stage 1: Move SL to BE (+1 pip buffer) at >= 1.0R
 TRAIL_ENABLED              = os.getenv("TRAIL_ENABLED", "0") == "1"          # Disabled: Trailing stops cut winners at 70-80% TP; disabled to allow full 100% TP wins
 TRAIL_MODE                 = os.getenv("TRAIL_MODE", "NONE")                 # "NONE" = pure BE + full TP targets (1.3R to 2.5R)
 TRAIL_STAGE1_PCT_TP        = float(os.getenv("TRAIL_STAGE1_PCT_TP", "85.0"))
@@ -206,7 +206,7 @@ SESSION_EVENING_END_UTC        = int(os.getenv("SESSION_EVENING_END_UTC", "24"))
 # ---- Phase 2: Turtle Soup / Inducement Sweep Re-Entry Engine ----
 # Automatically detects when pro-trend setups are stopped by shallow liquidity sweeps (<= 0.6R)
 # and triggers an instant high-RR re-entry when price rejects back into market structure!
-TURTLE_SOUP_REENTRY_ENABLED = os.getenv("TURTLE_SOUP_REENTRY_ENABLED", "1") == "1" # 1 = Enable Turtle Soup re-entries
+TURTLE_SOUP_REENTRY_ENABLED = os.getenv("TURTLE_SOUP_REENTRY_ENABLED", "0") == "1" # 0 = Disabled (Prevents double-loss bleed on expansion trends)
 TURTLE_SOUP_MAX_OVERSHOOT_R = float(os.getenv("TURTLE_SOUP_MAX_OVERSHOOT_R", "0.6")) # Max sweep overshoot (0.6R) beyond SL
 TURTLE_SOUP_MAX_WINDOW_MIN  = int(os.getenv("TURTLE_SOUP_MAX_WINDOW_MIN", "45"))    # Active monitoring window (45 mins)
 TURTLE_SOUP_SL_BUFFER_PIPS  = float(os.getenv("TURTLE_SOUP_SL_BUFFER_PIPS", "1.5")) # Pips behind sweep wick for tight stop
