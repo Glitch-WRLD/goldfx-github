@@ -254,6 +254,7 @@
   "USDJPY:2026-10-08T04:00:00+00:00",
   "USDJPY:2026-10-08T11:00:00+00:00",
   "USDJPY:2026-10-09T07:35:00+00:00",
+  "USDJPY:2026-10-09T07:40:00+00:00",
   "XAUUSD:2026-09-14T01:00:00+00:00",
   "XAUUSD:2026-09-14T02:30:00+00:00",
   "XAUUSD:2026-09-14T03:30:00+00:00",
@@ -344,6 +345,20 @@
   "XAUUSD:2026-10-09T06:30:00+00:00"
  ],
  "history": [
+  {
+   "dir": "LONG",
+   "entry": 158.352,
+   "profile": "balanced",
+   "ref": 307,
+   "rr": 2.0,
+   "sl": 158.26700000000002,
+   "strategy_badge": "\ud83c\udfaf ISDE Session Delivery",
+   "strategy_type": "isde_session",
+   "symbol": "USDJPY",
+   "tf": "M5",
+   "tp": 158.52199999999996,
+   "ts": "2026-10-09T07:40:00+00:00"
+  },
   {
    "dir": "LONG",
    "entry": 158.344,
@@ -6569,6 +6584,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 306,
+ "ref_seq": 307,
  "zones": []
 }
