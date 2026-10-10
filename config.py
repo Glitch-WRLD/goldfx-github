@@ -198,11 +198,19 @@ LONDON_OPEN_SYMBOLS         = {"XAUUSD", "EURUSD", "GBPUSD", "USDJPY", "USDCAD",
 # Rule 1: Higher Timeframe (HTF) Dual-Trend Alignment (Prunes 10.6% WR counter-trend setups)
 HTF_FILTER_ENABLED          = os.getenv("HTF_FILTER_ENABLED", "1") == "1"         # 1 = Filter setups fighting both H1 and H4 50 EMAs
 HTF_FILTER_EMA_LEN          = int(os.getenv("HTF_FILTER_EMA_LEN", "50"))          # EMA 50 trend baseline
-# Rule 2: Late NY / Rollover Session Exhaustion Guard (Prunes 36.2% WR evening drag, 17:00 - 24:00 UTC)
-# Asian Session (00:00 - 06:50 UTC) and London/NY Overlap remain 100% ACTIVE!
-SESSION_EVENING_FILTER_ENABLED = os.getenv("SESSION_EVENING_FILTER_ENABLED", "1") == "1" # 1 = Pause brand new fills after 17:00 UTC
-SESSION_EVENING_START_UTC      = int(os.getenv("SESSION_EVENING_START_UTC", "17")) # 17:00 UTC (European close / late US chop)
+# Rule 2: Late NY / Rollover Session Exhaustion Guard (Empirically superseded by surgical weakling filters)
+# The blanket 17:00-24:00 block is disabled (0) by default to capture profitable evening expansions
+# (+152.7R on NAS100, US500, USDCAD, XAUUSD), while surgical filters below prune toxic pairs & sessions.
+SESSION_EVENING_FILTER_ENABLED = os.getenv("SESSION_EVENING_FILTER_ENABLED", "0") == "1" # 0 = Disabled (use surgical filters)
+SESSION_EVENING_START_UTC      = int(os.getenv("SESSION_EVENING_START_UTC", "17")) # 17:00 UTC
 SESSION_EVENING_END_UTC        = int(os.getenv("SESSION_EVENING_END_UTC", "24"))   # 24:00 UTC
+
+# ---- Empirically Backtested Weakling Pruning Filters (+80.1R Portfolio Lift) ----
+# Prunes historical toxic session traps backtested across 4,401 trades.
+FILTER_THU_ASIAN_ENABLED       = os.getenv("FILTER_THU_ASIAN_ENABLED", "1") == "1"    # 1 = Drop Thu 00:00-06:59 UTC (-21.0R bleed, 36.9% WR)
+FILTER_SUN_OPEN_ENABLED        = os.getenv("FILTER_SUN_OPEN_ENABLED", "1") == "1"     # 1 = Drop Sun 18:00-23:59 UTC (-3.5R, broker spread blowout)
+FILTER_EVENING_CHOP_ENABLED    = os.getenv("FILTER_EVENING_CHOP_ENABLED", "1") == "1" # 1 = Drop USDJPY/USDCHF 19:00-21:59 UTC (-37.0R drag)
+FILTER_FRIDAY_MODE             = os.getenv("FILTER_FRIDAY_MODE", "FULL_DAY")          # "FULL_DAY" (user-maintained) | "MORNING_ONLY" | "DISABLED"
 
 # ---- Phase 2: Turtle Soup / Inducement Sweep Re-Entry Engine ----
 # Automatically detects when pro-trend setups are stopped by shallow liquidity sweeps (<= 0.6R)

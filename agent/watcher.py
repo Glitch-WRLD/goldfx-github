@@ -359,7 +359,7 @@ def _is_london_open_cooldown(symbol: str) -> bool:
 
 def _is_evening_exhaustion_window() -> bool:
     """True if current time is between 17:00 and 24:00 UTC (Late NY / Rollover exhaustion window)."""
-    if not getattr(config, "SESSION_EVENING_FILTER_ENABLED", True):
+    if not getattr(config, "SESSION_EVENING_FILTER_ENABLED", False):
         return False
     now_utc = _utcnow()
     sh = getattr(config, "SESSION_EVENING_START_UTC", 17)
@@ -1950,6 +1950,19 @@ def _execute_setup_entry(
         ledger.record_outcome(ref_key, status="skipped", hit="htf_counter_trend",
                               pnl_usd=0.0, classification="htf_trend_filter")
         return False, active_open_count, at_risk_count
+
+    # Phase 1 Weakling Pruning: Thu Asian (-21R), Sun Open (-3.5R), USDJPY/USDCHF Evening (-37R)
+    try:
+        from engine.scanner import is_weakling_filtered
+        is_weak, weak_reason = is_weakling_filtered(symbol, as_of_ts=entry.get("ts"))
+        if is_weak:
+            log.info("🛡️ WEAKLING_FILTER_BLOCK %s ref=%s — %s. MT5 execution blocked.",
+                     symbol, ref_key, weak_reason)
+            ledger.record_outcome(ref_key, status="skipped", hit="weakling_session_filter",
+                                  pnl_usd=0.0, classification="weakling_filter")
+            return False, active_open_count, at_risk_count
+    except Exception as e:
+        log.warning("is_weakling_filtered check failed for %s: %s", symbol, e)
 
     # Spread Filter Check
     if hasattr(ex, "get_spread"):
