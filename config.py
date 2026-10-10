@@ -149,13 +149,14 @@ GOLD_REVERSAL_EXIT_ENABLED = os.getenv("GOLD_REVERSAL_EXIT_ENABLED", "0") == "1"
 GOLD_REVERSAL_MIN_MFE_R    = float(os.getenv("GOLD_REVERSAL_MIN_MFE_R", "0.5"))
 GOLD_REVERSAL_TF           = os.getenv("GOLD_REVERSAL_TF", "M15")
 
-# ---- Trade Protection: Maintain 0.8R Breakeven, Disable Trailing Stops (Let Winners Run to 100% TP) ----
-BREAKEVEN_ENABLED          = os.getenv("BREAKEVEN_ENABLED", "1") == "1"       # Stage 1: Move SL to BE (+1 pip) when price reaches >= 65% TP / 1.0R
-BREAKEVEN_PCT_TP           = float(os.getenv("BREAKEVEN_PCT_TP", "65.0"))     # Stage 1: Move SL to BE (+1 pip) when price reaches >= 65% of TP (allows winners room to run)
-BREAKEVEN_PCT_TP_GBPAUD    = float(os.getenv("BREAKEVEN_PCT_TP_GBPAUD", "70.0")) # Stage 1 GBPAUD: Wider BE buffer (70% TP) for deep SMC inducement retests
+# ---- Trade Protection: Breakeven Disabled (Empirical audit: BE@50% scratched 33 winners into 0R; Pure Hold yields +712R) ----
+BREAKEVEN_ENABLED          = os.getenv("BREAKEVEN_ENABLED", "0") == "1"       # 0 = Disabled (Let winners run to full 100% TP)
+BREAKEVEN_PCT_TP           = float(os.getenv("BREAKEVEN_PCT_TP", "65.0"))     # Stage 1: Move SL to BE (+1 pip) when price reaches >= 65% of TP
+BREAKEVEN_PCT_TP_GBPAUD    = float(os.getenv("BREAKEVEN_PCT_TP_GBPAUD", "70.0")) # Stage 1 GBPAUD: Wider BE buffer (70% TP)
 BREAKEVEN_MFE_R            = float(os.getenv("BREAKEVEN_MFE_R", "1.0"))      # Stage 1: Move SL to BE (+1 pip buffer) at >= 1.0R
-TRAIL_ENABLED              = os.getenv("TRAIL_ENABLED", "0") == "1"          # Disabled: Trailing stops cut winners at 70-80% TP; disabled to allow full 100% TP wins
-TRAIL_MODE                 = os.getenv("TRAIL_MODE", "NONE")                 # "NONE" = pure BE + full TP targets (1.3R to 2.5R)
+TRAIL_ENABLED              = os.getenv("TRAIL_ENABLED", "0") == "1"          # Disabled: Trailing stops cut winners
+TRAIL_MODE                 = os.getenv("TRAIL_MODE", "NONE")                 # "NONE" = pure hold to full TP targets
+
 TRAIL_STAGE1_PCT_TP        = float(os.getenv("TRAIL_STAGE1_PCT_TP", "85.0"))
 TRAIL_STAGE1_LOCK_PCT      = float(os.getenv("TRAIL_STAGE1_LOCK_PCT", "70.0"))
 TRAIL_STAGE2_PCT_TP        = float(os.getenv("TRAIL_STAGE2_PCT_TP", "92.0"))
@@ -219,10 +220,9 @@ ISDE_TARGET_RR        = float(os.getenv("ISDE_TARGET_RR", "2.0"))          # Fix
 ISDE_MIN_GAP_FX       = float(os.getenv("ISDE_MIN_GAP_FX", "1.5"))        # Min FVG gap (pips) for FX
 ISDE_MIN_GAP_GOLD     = float(os.getenv("ISDE_MIN_GAP_GOLD", "50.0"))     # Min FVG gap ($0.50) for Gold
 ISDE_MIN_GAP_INDEX    = float(os.getenv("ISDE_MIN_GAP_INDEX", "2.0"))      # Min FVG gap (2.0 pts) for Indices
+# Empirical backtest (110 days, 1,164 trades): Gold London Open is the sole profitable asset (+23.5R, PF 1.11).
+# Forex pairs (USDJPY, EURUSD, GBPUSD) chop into M5 stops (-122.8R) and are pruned.
 ISDE_WINDOWS = {
     "XAUUSD": {"start_utc": 7, "end_utc": 9, "bias_htf": "H1", "min_gap": 50.0},
-    "USDJPY": {"start_utc": 7, "end_utc": 9, "bias_htf": "H1", "min_gap": 1.5},
-    "DJ30":   {"start_utc": 14, "end_utc": 15, "bias_htf": "H1", "min_gap": 2.0},
-    "EURUSD": {"start_utc": 14, "end_utc": 15, "bias_htf": "H1", "min_gap": 1.5},
-    "GBPUSD": {"start_utc": 14, "end_utc": 15, "bias_htf": "H1", "min_gap": 1.5},
-}
+}
+

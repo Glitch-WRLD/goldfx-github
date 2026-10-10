@@ -1057,7 +1057,7 @@ def manage_open_positions(ledger) -> int:
         if trail_mode == "PERCENTAGE":
             is_stage3 = trail_enabled and (pct_tp >= t2_pct or peak_pct_tp >= t2_pct)
             is_stage2 = trail_enabled and (pct_tp >= t1_pct or peak_pct_tp >= t1_pct)
-            is_stage1 = (pct_tp >= be_pct or peak_pct_tp >= be_pct)
+            is_stage1 = getattr(config, "BREAKEVEN_ENABLED", False) and (pct_tp >= be_pct or peak_pct_tp >= be_pct)
             trail_stage3_sl = round(fill_price + (t2_lock_pct * target_dist), digits) if direction == 1 else round(fill_price - (t2_lock_pct * target_dist), digits)
             trail_stage2_sl = round(fill_price + (t1_lock_pct * target_dist), digits) if direction == 1 else round(fill_price - (t1_lock_pct * target_dist), digits)
             s3_locked_usd = float(pos.get("risk_usd", 100.0)) * (rr * t2_lock_pct)
@@ -1067,7 +1067,7 @@ def manage_open_positions(ledger) -> int:
         else:
             is_stage3 = trail_enabled and (mfe_r >= trail2_threshold or peak_mfe >= trail2_threshold)
             is_stage2 = trail_enabled and (mfe_r >= trail1_threshold or peak_mfe >= trail1_threshold)
-            is_stage1 = (mfe_r >= be_threshold or peak_mfe >= be_threshold)
+            is_stage1 = getattr(config, "BREAKEVEN_ENABLED", False) and (mfe_r >= be_threshold or peak_mfe >= be_threshold)
             trail_stage3_sl = round(fill_price + (trail2_lock * risk), digits) if direction == 1 else round(fill_price - (trail2_lock * risk), digits)
             trail_stage2_sl = round(fill_price + (trail1_lock * risk), digits) if direction == 1 else round(fill_price - (trail1_lock * risk), digits)
             s3_locked_usd = float(pos.get("risk_usd", 100.0)) * trail2_lock
@@ -2380,7 +2380,7 @@ def scan_local_mt5_setups(
             _last_scanned_bars[symbol] = last_closed_ts
 
             # Scan the latest closed bar (lookback=2 checks closed bars up to df.index[-2])
-            sigs = _local_fvg_scanner.scan_catchup(symbol, entry_tf, bias_htf, lookback=2)
+            sigs = _local_fvg_scanner.scan_catchup(symbol, entry_tf, bias_htf, lookback=10)
             if not sigs:
                 continue
 
@@ -2463,7 +2463,7 @@ def scan_local_mt5_setups(
 
                 _last_scanned_isde_m5[symbol] = last_closed_m5
 
-                isde_sigs = _local_fvg_scanner.scan_isde_signals(symbol, lookback=2)
+                isde_sigs = _local_fvg_scanner.scan_isde_signals(symbol, lookback=10)
                 if not isde_sigs:
                     continue
 
