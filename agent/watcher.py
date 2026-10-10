@@ -35,6 +35,7 @@ from agent.oanda import executor_for_env, Fill
 from agent.ledger import load_ledger
 from engine.risk import RiskManager, position_size, floor_lots
 from strategy.profiles import SYMBOL_RUNTIME
+from data.clock import utc_now as _utcnow, refresh_skew as _refresh_clock_skew
 
 log = logging.getLogger("goldfx.agent")
 
@@ -295,7 +296,7 @@ def _format_fill_message(fill: Fill, entry: dict) -> str:
 
 def _is_rollover_blackout() -> bool:
     """True if current UTC time is within the daily rollover blackout window (e.g. 20:55 - 22:15 UTC)."""
-    now_utc = dt.datetime.now(dt.timezone.utc).time()
+    now_utc = _utcnow().time()
     try:
         sh, sm = [int(x) for x in getattr(config, "ROLLOVER_START_UTC", "23:45").split(":")]
         eh, em = [int(x) for x in getattr(config, "ROLLOVER_END_UTC", "00:25").split(":")]
@@ -310,7 +311,7 @@ def _is_rollover_blackout() -> bool:
 
 def _is_prerollover_window() -> bool:
     """True if within the 15-minute pre-rollover de-risking window (23:30 - 23:45 UTC)."""
-    now_utc = dt.datetime.now(dt.timezone.utc).time()
+    now_utc = _utcnow().time()
     try:
         sh, sm = [int(x) for x in getattr(config, "ROLLOVER_START_UTC", "23:45").split(":")]
         start_min = sh * 60 + sm
@@ -327,7 +328,7 @@ def _is_us_open_cooldown(symbol: str) -> bool:
         return False
     if symbol not in getattr(config, "INDEX_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"}):
         return False
-    now_utc = dt.datetime.now(dt.timezone.utc).time()
+    now_utc = _utcnow().time()
     try:
         sh, sm = [int(x) for x in getattr(config, "US_OPEN_START_UTC", "13:25").split(":")]
         eh, em = [int(x) for x in getattr(config, "US_OPEN_END_UTC", "13:45").split(":")]
@@ -347,7 +348,7 @@ def _is_london_open_cooldown(symbol: str) -> bool:
     )
     if symbol not in london_symbols:
         return False
-    now_utc = dt.datetime.now(dt.timezone.utc).time()
+    now_utc = _utcnow().time()
     try:
         sh, sm = [int(x) for x in getattr(config, "LONDON_OPEN_START_UTC", "06:50").split(":")]
         eh, em = [int(x) for x in getattr(config, "LONDON_OPEN_END_UTC", "07:20").split(":")]
@@ -360,7 +361,7 @@ def _is_evening_exhaustion_window() -> bool:
     """True if current time is between 17:00 and 24:00 UTC (Late NY / Rollover exhaustion window)."""
     if not getattr(config, "SESSION_EVENING_FILTER_ENABLED", True):
         return False
-    now_utc = dt.datetime.now(dt.timezone.utc)
+    now_utc = _utcnow()
     sh = getattr(config, "SESSION_EVENING_START_UTC", 17)
     eh = getattr(config, "SESSION_EVENING_END_UTC", 24)
     return sh <= now_utc.hour < eh
@@ -758,7 +759,7 @@ def manage_open_positions(ledger) -> int:
                                                 "risk_usd": float(pos.get("risk_usd", 100.0)),
                                                 "exit_price": float(exit_price),
                                                 "sweep_extreme": float(exit_price),
-                                                "exit_ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+                                                "exit_ts": _utcnow().isoformat(),
                                             }
                                             _save_pending_turtle_soup(pending_soup)
                                             log.info("TURTLE_SOUP_ENQUEUED: ref=%s symbol=%s dir=%d SL=%.5f exit=%.5f (monitoring for inducement sweep re-entry)",
@@ -1538,7 +1539,7 @@ def process_pending_turtle_soup(ledger) -> int:
 
     ex = get_executor()
     rm = risk()
-    now_utc = dt.datetime.now(dt.timezone.utc)
+    now_utc = _utcnow()
     still_pending = {}
     reentered_count = 0
 
@@ -1689,7 +1690,7 @@ def process_pending_turtle_soup(ledger) -> int:
             "order_id": fill.order_id,
             "broker": fill.broker,
             "ts": fill.ts,
-            "signal_ts": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "signal_ts": _utcnow().isoformat(),
             "status": "open",
             "sl_state": "initial",
             "peak_mfe_r": 0.0,
@@ -1783,7 +1784,7 @@ def _execute_setup_entry(
             tf = str(entry.get("tf", "M15")).upper()
             tf_mins = 5 if tf == "M5" else (15 if tf == "M15" else (30 if tf == "M30" else (60 if tf == "H1" else (120 if tf == "H2" else (240 if tf == "H4" else (1440 if tf == "D1" else 15))))))
             candle_close_dt = sig_dt + dt.timedelta(minutes=tf_mins)
-            now_utc = dt.datetime.now(dt.timezone.utc)
+            now_utc = _utcnow()
             age_min = max(0.0, (now_utc - candle_close_dt).total_seconds() / 60.0)
             max_age_min = float(getattr(config, "MAX_SIGNAL_AGE_MIN", 45.0))
             if age_min > max_age_min:
@@ -2439,12 +2440,16 @@ def scan_local_mt5_setups(
     # 2. Institutional Session Delivery Engine (ISDE M5 Precision Local Scanner)
     if getattr(config, "ISDE_ENABLED", True):
         isde_windows = getattr(config, "ISDE_WINDOWS", {})
-        now_utc_hour = dt.datetime.now(dt.timezone.utc).hour
+        _now_isde = _utcnow()
+        now_utc_hour = _now_isde.hour
         for symbol, cfg in isde_windows.items():
             sh = cfg.get("start_utc", 7)
             eh = cfg.get("end_utc", 15)
             # Active killzone: London (07:00-09:00 UTC) or NY Silver Bullet (14:00-15:00 UTC)
-            if not (sh <= now_utc_hour < eh):
+            # Grace: a signal bar closing at HH:55 is only seen at (HH+1):00-:10, so keep scanning
+            # for 10 min past the window end (the scanner itself still checks the bar's own hour).
+            in_grace = (now_utc_hour == eh and _now_isde.minute < 10)
+            if not (sh <= now_utc_hour < eh or in_grace):
                 continue
 
             try:
@@ -2516,6 +2521,7 @@ def scan_local_mt5_setups(
 def tick() -> bool:
     """One poll cycle: fetch state → local MT5 scan → fire fills → manage open positions → reconcile outcomes.
     Returns True if any new fill was fired."""
+    _refresh_clock_skew()   # cached 5 min; logs CRITICAL + auto-resyncs if PC clock is off
     state = fetch_state()
     if not state:
         return False

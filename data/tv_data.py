@@ -8,9 +8,13 @@ TradingView's public (anonymous) chart-session websocket via the
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
+import time
 import sys
 from pathlib import Path
+
+_offset_check_ts = 0.0
 
 import pandas as pd
 from tradingview_sdk import AsyncTradingView, Interval
@@ -141,8 +145,18 @@ def _fetch_from_mt5(symbol: str, tf: str) -> pd.DataFrame | None:
         tick = mt5.symbol_info_tick(symbol)
         if tick is None:
             return None
-        now_utc = dt.datetime.now(dt.timezone.utc).timestamp()
-        offset_sec = round((tick.time - now_utc) / 3600.0) * 3600
+        # Deterministic broker offset (NY time + 7h). The old "tick.time - PC now" rounding
+        # broke when the PC clock drifted (>30 min) or the last tick was stale (market close).
+        from data.clock import broker_offset_sec, utc_ts
+        offset_sec = broker_offset_sec()
+        global _offset_check_ts
+        if time.time() - _offset_check_ts > 600:
+            _offset_check_ts = time.time()
+            # A tick can be stale (past) but never in the future: if it is, the offset is wrong.
+            if (tick.time - offset_sec) - utc_ts() > 120:
+                logging.getLogger("tv_data").warning(
+                    "broker offset suspect: rule=%+ds but tick is %.0fs in the future "
+                    "(set BROKER_UTC_OFFSET_H?)", offset_sec, (tick.time - offset_sec) - utc_ts())
 
         rates = mt5.copy_rates_from_pos(symbol, tf_map[tf], 0, 500)
         if rates is None or len(rates) < 30:
