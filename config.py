@@ -221,13 +221,33 @@ FILTER_SUN_OPEN_ENABLED        = os.getenv("FILTER_SUN_OPEN_ENABLED", "1") == "1
 FILTER_EVENING_CHOP_ENABLED    = os.getenv("FILTER_EVENING_CHOP_ENABLED", "1") == "1" # 1 = Drop USDJPY/USDCHF 19:00-21:59 UTC (-37.0R drag)
 FILTER_FRIDAY_MODE             = os.getenv("FILTER_FRIDAY_MODE", "FULL_DAY")          # "FULL_DAY" (user-maintained) | "MORNING_ONLY" | "DISABLED"
 
-# ---- Phase 2: Turtle Soup / Inducement Sweep Re-Entry Engine ----
-# Automatically detects when pro-trend setups are stopped by shallow liquidity sweeps (<= 0.6R)
-# and triggers an instant high-RR re-entry when price rejects back into market structure!
-TURTLE_SOUP_REENTRY_ENABLED = os.getenv("TURTLE_SOUP_REENTRY_ENABLED", "0") == "1" # 0 = Disabled (Prevents double-loss bleed on expansion trends)
-TURTLE_SOUP_MAX_OVERSHOOT_R = float(os.getenv("TURTLE_SOUP_MAX_OVERSHOOT_R", "0.6")) # Max sweep overshoot (0.6R) beyond SL
-TURTLE_SOUP_MAX_WINDOW_MIN  = int(os.getenv("TURTLE_SOUP_MAX_WINDOW_MIN", "45"))    # Active monitoring window (45 mins)
-TURTLE_SOUP_SL_BUFFER_PIPS  = float(os.getenv("TURTLE_SOUP_SL_BUFFER_PIPS", "1.5")) # Pips behind sweep wick for tight stop
+# ---- Phase 2: Turtle Soup / Inducement Sweep Re-Entry Engine (Hardened System A) ----
+# Automatically detects when pro-trend setups are stopped by shallow liquidity sweeps (<= 0.35R)
+# and triggers an instant asymmetrical re-entry targeting Original Entry with micro-stop floor protection!
+TURTLE_SOUP_REENTRY_ENABLED = os.getenv("TURTLE_SOUP_REENTRY_ENABLED", "1") == "1" # 1 = Enabled (Hardened System A)
+TURTLE_SOUP_MAX_OVERSHOOT_R = float(os.getenv("TURTLE_SOUP_MAX_OVERSHOOT_R", "0.35")) # Max sweep overshoot (<= 0.35R) beyond SL
+TURTLE_SOUP_MAX_WINDOW_MIN  = int(os.getenv("TURTLE_SOUP_MAX_WINDOW_MIN", "15"))    # Active monitoring window (<= 15 mins / 3 M5 bars)
+TURTLE_SOUP_SL_BUFFER_PIPS  = float(os.getenv("TURTLE_SOUP_SL_BUFFER_PIPS", "3.5")) # 3.5 pips behind sweep wick (spread armor)
+TURTLE_SOUP_MIN_WICK_RATIO  = float(os.getenv("TURTLE_SOUP_MIN_WICK_RATIO", "0.50")) # Sweep candle wick ratio >= 50% or body closed inside
+TURTLE_SOUP_TARGET_MODE     = os.getenv("TURTLE_SOUP_TARGET_MODE", "ORIGINAL_ENTRY") # Target Original Entry; closed instantly via LOCAL_TP_GUARD
+TURTLE_SOUP_NEWS_BLACKOUT   = os.getenv("TURTLE_SOUP_NEWS_BLACKOUT", "1") == "1"     # 1 = Bypasses any SL within +-20 mins of Tier-1 news
+
+# Physical broker & spread buffer minimum stop floors per symbol (prevents micro-stop artifacts)
+TURTLE_SOUP_MIN_STOP_FLOOR  = {
+    "XAUUSD": float(os.getenv("TURTLE_SOUP_MIN_STOP_GOLD", "1.50")),    # $1.50 Gold floor (150 pts)
+    "EURUSD": float(os.getenv("TURTLE_SOUP_MIN_STOP_EURUSD", "0.00050")), # 5.0 pips
+    "GBPUSD": float(os.getenv("TURTLE_SOUP_MIN_STOP_GBPUSD", "0.00050")), # 5.0 pips
+    "USDJPY": float(os.getenv("TURTLE_SOUP_MIN_STOP_USDJPY", "0.050")),   # 5.0 pips
+    "USDCAD": float(os.getenv("TURTLE_SOUP_MIN_STOP_USDCAD", "0.00050")), # 5.0 pips
+    "AUDUSD": float(os.getenv("TURTLE_SOUP_MIN_STOP_AUDUSD", "0.00050")), # 5.0 pips
+    "NZDUSD": float(os.getenv("TURTLE_SOUP_MIN_STOP_NZDUSD", "0.00050")), # 5.0 pips
+    "USDCHF": float(os.getenv("TURTLE_SOUP_MIN_STOP_USDCHF", "0.00050")), # 5.0 pips
+    "GBPAUD": float(os.getenv("TURTLE_SOUP_MIN_STOP_GBPAUD", "0.00060")), # 6.0 pips
+    "NASDAQ-100": float(os.getenv("TURTLE_SOUP_MIN_STOP_NAS100", "8.0")), # 8.0 index pts
+    "US500": float(os.getenv("TURTLE_SOUP_MIN_STOP_US500", "4.0")),       # 4.0 index pts
+    "DJ30": float(os.getenv("TURTLE_SOUP_MIN_STOP_DJ30", "15.0")),        # 15.0 index pts
+}
+
 
 # ---- Strategy 3: Institutional Session Delivery Engine (ISDE) ----
 # Exploits high-conviction temporal liquidity windows (London Open 07:00-09:00 & NY Silver Bullet 14:00-15:00)

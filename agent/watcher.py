@@ -739,31 +739,45 @@ def manage_open_positions(ledger) -> int:
                             # Phase 2: Enqueue stopped-out trade for Turtle Soup / Inducement Sweep Re-Entry
                             if getattr(config, "TURTLE_SOUP_REENTRY_ENABLED", True) and not str(ref).startswith("soup_"):
                                 try:
-                                    pending_soup = _load_pending_turtle_soup()
-                                    ref_str = str(ref)
-                                    if ref_str not in pending_soup:
-                                        fill_price_val = float(pos.get("fill_price", 0.0))
-                                        sl_price_val = float(pos.get("sl", 0.0))
-                                        tp_price_val = float(pos.get("tp", 0.0))
-                                        sl_dist_val = abs(fill_price_val - sl_price_val)
-                                        direction_val = int(pos.get("direction", 1))
-                                        if sl_dist_val > 0 and tp_price_val > 0:
-                                            pending_soup[ref_str] = {
-                                                "ref": ref,
-                                                "symbol": pos.get("symbol"),
-                                                "direction": direction_val,
-                                                "original_entry": fill_price_val,
-                                                "original_sl": sl_price_val,
-                                                "original_tp": tp_price_val,
-                                                "sl_dist": sl_dist_val,
-                                                "risk_usd": float(pos.get("risk_usd", 100.0)),
-                                                "exit_price": float(exit_price),
-                                                "sweep_extreme": float(exit_price),
-                                                "exit_ts": _utcnow().isoformat(),
-                                            }
-                                            _save_pending_turtle_soup(pending_soup)
-                                            log.info("TURTLE_SOUP_ENQUEUED: ref=%s symbol=%s dir=%d SL=%.5f exit=%.5f (monitoring for inducement sweep re-entry)",
-                                                     ref_str, pos.get("symbol"), direction_val, sl_price_val, exit_price)
+                                    sym_val = pos.get("symbol", "")
+                                    is_news_bo = False
+                                    if getattr(config, "TURTLE_SOUP_NEWS_BLACKOUT", True):
+                                        try:
+                                            from engine.news import get_active_news_blackout
+                                            is_news_bo, bo_reason, _ = get_active_news_blackout(sym_val, buffer_before_min=20, buffer_after_min=20)
+                                        except Exception as e_news:
+                                            log.warning("News check failed during turtle soup enqueue ref=%s: %s", ref, e_news)
+
+                                    if is_news_bo:
+                                        log.info("TURTLE_SOUP_NEWS_BYPASS: ref=%s %s stopped out during Tier-1 news (%s) — skipping TS enqueue",
+                                                 ref, sym_val, bo_reason)
+                                    else:
+                                        pending_soup = _load_pending_turtle_soup()
+                                        ref_str = str(ref)
+                                        if ref_str not in pending_soup:
+                                            fill_price_val = float(pos.get("fill_price", 0.0) or pos.get("entry", 0.0))
+                                            sl_price_val = float(pos.get("sl", 0.0))
+                                            tp_price_val = float(pos.get("tp", 0.0))
+                                            sl_dist_val = abs(fill_price_val - sl_price_val)
+                                            direction_val = int(pos.get("direction", 1))
+                                            if sl_dist_val > 0 and tp_price_val > 0:
+                                                pending_soup[ref_str] = {
+                                                    "ref": ref,
+                                                    "symbol": sym_val,
+                                                    "direction": direction_val,
+                                                    "original_entry": fill_price_val,
+                                                    "original_sl": sl_price_val,
+                                                    "original_tp": tp_price_val,
+                                                    "sl_dist": sl_dist_val,
+                                                    "risk_usd": float(pos.get("risk_usd", 100.0)),
+                                                    "exit_price": float(exit_price),
+                                                    "sweep_extreme": float(exit_price),
+                                                    "exit_ts": _utcnow().isoformat(),
+                                                    "profile": pos.get("profile", ""),
+                                                }
+                                                _save_pending_turtle_soup(pending_soup)
+                                                log.info("TURTLE_SOUP_ENQUEUED: ref=%s symbol=%s dir=%d SL=%.5f exit=%.5f (monitoring for inducement sweep re-entry)",
+                                                         ref_str, sym_val, direction_val, sl_price_val, exit_price)
                                 except Exception as e:
                                     log.warning("Failed to enqueue turtle soup for ref=%s: %s", ref, e)
                         else:
@@ -1528,12 +1542,16 @@ def process_pending_retracements(ledger) -> int:
 
 
 def process_pending_turtle_soup(ledger) -> int:
-    """Evaluate active pending Turtle Soup / Inducement Sweep setups (Phase 2).
-    - Checks invalidation: age > 45 mins -> expire
-    - Checks invalidation: overshoot > 0.6R -> expire (true trend breakdown, not a sweep)
+    """Evaluate active pending Turtle Soup / Inducement Sweep setups (Hardened System A).
+    - Checks invalidation: age > 15 mins (<= 3 M5 bars) -> expire
+    - Checks news safeguard: within +-20 mins of Tier-1 news -> bypass/expire
+    - Checks invalidation: overshoot > 0.35R -> expire (true trend breakdown, not a sweep)
     - Checks invalidation: original TP reached before re-entry -> expire
-    - Checks trigger: price rejects and reclaims back inside original SL level
-    - Fires sniper market order with tight stop at sweep extreme + buffer
+    - Checks trigger & confirmation: price reclaims original SL AND M5 rejection confirms (wick >= 50% or body closed inside)
+    - Target: Original Entry level (Breaker Block), protected by LOCAL_TP_GUARD
+    - Stop Loss: 3.5 pips behind sweep wick + enforced minimum stop floor per symbol
+    - Position Sizing: strictly 3.5% risk governed by the Weekly Step-Compounding Anchor
+    - Capacity: global portfolio risk budget (no artificial concurrent TS cap)
     """
     if not getattr(config, "TURTLE_SOUP_REENTRY_ENABLED", True):
         return 0
@@ -1562,11 +1580,23 @@ def process_pending_turtle_soup(ledger) -> int:
         except Exception:
             age_min = 0.0
 
-        # 1. Invalidation: age > 45 mins
-        max_win = getattr(config, "TURTLE_SOUP_MAX_WINDOW_MIN", 45)
+        # 1. Invalidation: age > 15 mins (<= 3 M5 bars)
+        max_win = getattr(config, "TURTLE_SOUP_MAX_WINDOW_MIN", 15)
         if age_min > max_win:
             log.info("TURTLE_SOUP_EXPIRED: ref=%s %s age=%.1fm > %dm", ref_key, symbol, age_min, max_win)
             continue
+
+        # 2. News Safeguard: Tier-1 news blackout check (+-20 mins)
+        if getattr(config, "TURTLE_SOUP_NEWS_BLACKOUT", True):
+            try:
+                from engine.news import get_active_news_blackout
+                is_news_bo, bo_reason, _ = get_active_news_blackout(symbol, buffer_before_min=20, buffer_after_min=20)
+                if is_news_bo:
+                    log.info("TURTLE_SOUP_NEWS_EXPIRED: ref=%s %s active news window (%s) — cancelling re-entry",
+                             ref_key, symbol, bo_reason)
+                    continue
+            except Exception as e_news:
+                log.warning("News check failed in turtle soup loop ref=%s: %s", ref_key, e_news)
 
         c_info = config.CONTRACTS.get(symbol, {})
         point = c_info.get("point", 0.01 if symbol == "XAUUSD" or "JPY" in symbol else 0.00001)
@@ -1583,50 +1613,112 @@ def process_pending_turtle_soup(ledger) -> int:
             still_pending[ref_key] = item
             continue
 
-        max_overshoot_r = getattr(config, "TURTLE_SOUP_MAX_OVERSHOOT_R", 0.6)
+        # Fetch recent M5 bars for candle confirmation & sweep extreme verification
+        post_m5 = None
+        try:
+            from data.tv_data import get_df
+            import pandas as pd
+            df_m5 = get_df(symbol, "M5", refresh=True)
+            if df_m5 is not None and not df_m5.empty:
+                post_m5 = df_m5.loc[df_m5.index >= (exit_ts - pd.Timedelta(minutes=5))]
+        except Exception as e_df:
+            log.debug("M5 fetch failed in turtle soup for %s: %s", symbol, e_df)
 
-        # 2. Update sweep extreme & check overshoot
-        triggered = False
-        if direction == 1:  # BUY setup stopped below orig_sl
-            if cur_price < sweep_extreme:
-                sweep_extreme = cur_price
-                item["sweep_extreme"] = sweep_extreme
-            overshoot_r = (orig_sl - sweep_extreme) / sl_dist if sl_dist > 0 else 0
-            if overshoot_r > max_overshoot_r:
-                log.info("TURTLE_SOUP_INVALID_DEEP: ref=%s %s overshoot=%.2fR > %.2fR (true breakdown, not sweep)",
-                         ref_key, symbol, overshoot_r, max_overshoot_r)
-                continue
-            if cur_price >= orig_tp:
-                log.info("TURTLE_SOUP_MISSED_TP: ref=%s %s price touched original TP before re-entry", ref_key, symbol)
-                continue
-            # Trigger condition: Market price reclaims above original SL
-            if cur_price >= orig_sl:
-                triggered = True
-        else:  # SELL setup stopped above orig_sl
-            if cur_price > sweep_extreme:
-                sweep_extreme = cur_price
-                item["sweep_extreme"] = sweep_extreme
-            overshoot_r = (sweep_extreme - orig_sl) / sl_dist if sl_dist > 0 else 0
-            if overshoot_r > max_overshoot_r:
-                log.info("TURTLE_SOUP_INVALID_DEEP: ref=%s %s overshoot=%.2fR > %.2fR (true breakdown, not sweep)",
-                         ref_key, symbol, overshoot_r, max_overshoot_r)
-                continue
-            if cur_price <= orig_tp:
-                log.info("TURTLE_SOUP_MISSED_TP: ref=%s %s price touched original TP before re-entry", ref_key, symbol)
-                continue
-            # Trigger condition: Market price reclaims below original SL
-            if cur_price <= orig_sl:
-                triggered = True
+        # Update sweep extreme from recent M5 low/high and live tick
+        if post_m5 is not None and len(post_m5) > 0:
+            if direction == 1:
+                sweep_extreme = min(sweep_extreme, cur_price, float(post_m5["low"].min()))
+            else:
+                sweep_extreme = max(sweep_extreme, cur_price, float(post_m5["high"].max()))
+        else:
+            if direction == 1:
+                sweep_extreme = min(sweep_extreme, cur_price)
+            else:
+                sweep_extreme = max(sweep_extreme, cur_price)
+        item["sweep_extreme"] = sweep_extreme
 
+        # 3. Overshoot check: <= 0.35R
+        max_overshoot_r = getattr(config, "TURTLE_SOUP_MAX_OVERSHOOT_R", 0.35)
+        if direction == 1:
+            overshoot_dist = max(0.0, orig_sl - sweep_extreme)
+        else:
+            overshoot_dist = max(0.0, sweep_extreme - orig_sl)
+        overshoot_r = overshoot_dist / sl_dist if sl_dist > 0 else 0.0
+
+        if overshoot_r > max_overshoot_r:
+            log.info("TURTLE_SOUP_INVALID_DEEP: ref=%s %s overshoot=%.2fR > %.2fR (true breakdown, not sweep)",
+                     ref_key, symbol, overshoot_r, max_overshoot_r)
+            continue
+
+        # 4. Check if original TP was already touched before re-entry
+        if direction == 1 and cur_price >= orig_tp:
+            log.info("TURTLE_SOUP_MISSED_TP: ref=%s %s price touched original TP before re-entry", ref_key, symbol)
+            continue
+        if direction == -1 and cur_price <= orig_tp:
+            log.info("TURTLE_SOUP_MISSED_TP: ref=%s %s price touched original TP before re-entry", ref_key, symbol)
+            continue
+
+        # 5. Check trigger: price reclaims back inside original SL level
+        triggered = (cur_price >= orig_sl) if direction == 1 else (cur_price <= orig_sl)
         if not triggered:
             still_pending[ref_key] = item
             continue
 
-        # 3. Triggered! Check portfolio capacity & risk limits
-        open_sym_count = len([e for e in ledger.open_entries().values() if e.get("symbol") == symbol])
-        if open_sym_count >= getattr(config, "MAX_TOTAL_PER_SYMBOL", 3):
+        # 6. Rejection Confirmation: M5 candle close inside SL or sweep wick ratio >= 50%
+        confirmed = False
+        min_wick_ratio = getattr(config, "TURTLE_SOUP_MIN_WICK_RATIO", 0.50)
+        if post_m5 is not None and len(post_m5) > 0:
+            try:
+                if direction == 1:
+                    sw_idx = post_m5["low"].idxmin()
+                    sw_bar = post_m5.loc[sw_idx]
+                    sw_rng = float(sw_bar["high"]) - float(sw_bar["low"])
+                    sw_wick = min(float(sw_bar["open"]), float(sw_bar["close"])) - float(sw_bar["low"])
+                    wick_ratio = sw_wick / sw_rng if sw_rng > 0 else 0.0
+                    body_inside = float(sw_bar["close"]) >= orig_sl
+                    last_closed = post_m5.iloc[-2] if len(post_m5) >= 2 else post_m5.iloc[-1]
+                    m5_close_inside = float(last_closed["close"]) >= orig_sl
+                else:
+                    sw_idx = post_m5["high"].idxmax()
+                    sw_bar = post_m5.loc[sw_idx]
+                    sw_rng = float(sw_bar["high"]) - float(sw_bar["low"])
+                    sw_wick = float(sw_bar["high"]) - max(float(sw_bar["open"]), float(sw_bar["close"]))
+                    wick_ratio = sw_wick / sw_rng if sw_rng > 0 else 0.0
+                    body_inside = float(sw_bar["close"]) <= orig_sl
+                    last_closed = post_m5.iloc[-2] if len(post_m5) >= 2 else post_m5.iloc[-1]
+                    m5_close_inside = float(last_closed["close"]) <= orig_sl
+
+                if wick_ratio >= min_wick_ratio or body_inside or m5_close_inside:
+                    confirmed = True
+                else:
+                    log.info("TURTLE_SOUP_AWAITING_CONFIRMATION: ref=%s %s reclaimed orig_sl (wick=%.2f body=%s m5_close=%s)",
+                             ref_key, symbol, wick_ratio, body_inside, m5_close_inside)
+            except Exception as e_cf:
+                log.warning("Candle confirmation calculation error ref=%s: %s", ref_key, e_cf)
+                confirmed = True  # Fallback to trigger on error
+        else:
+            confirmed = True  # Fallback if candle data unavailable
+
+        if not confirmed:
+            still_pending[ref_key] = item
+            continue
+
+        # 7. Portfolio Capacity & Risk Limits
+        open_entries = ledger.open_entries()
+        open_sym_count = len([e for e in open_entries.values() if e.get("symbol") == symbol])
+        if open_sym_count >= getattr(config, "MAX_TOTAL_PER_SYMBOL", 5):
             log.warning("TURTLE_SOUP_CAP_BLOCKED: ref=%s %s symbol concentration full (%d open) — holding in queue",
-                        ref_key, symbol, open_sym_count)
+                ref_key, symbol, open_sym_count)
+            still_pending[ref_key] = item
+            continue
+
+        from config import dynamic_portfolio_capacity
+        max_total_trades, max_at_risk, max_trades_sym, max_port_risk, tier_desc = dynamic_portfolio_capacity(
+            rm.balance, is_cent=getattr(config, "IS_CENT_ACCOUNT", False)
+        )
+        if len(open_entries) >= max_total_trades:
+            log.warning("TURTLE_SOUP_CAP_BLOCKED: ref=%s %s portfolio capacity full (%d/%d open) — holding in queue",
+                        ref_key, symbol, len(open_entries), max_total_trades)
             still_pending[ref_key] = item
             continue
 
@@ -1634,30 +1726,61 @@ def process_pending_turtle_soup(ledger) -> int:
         if hasattr(ex, "has_position_with_ref") and ex.has_position_with_ref(soup_label):
             log.info("TURTLE_SOUP_ALREADY_OPEN: ref=%s %s %s already active in MT5", ref_key, symbol, soup_label)
             continue
-
-        # 4. Compute tight stop loss right behind the sweep wick
-        buf_pips = getattr(config, "TURTLE_SOUP_SL_BUFFER_PIPS", 1.5)
-        pip_scale = 0.01 if "JPY" in symbol or symbol == "XAUUSD" else (1.0 if any(idx in symbol for idx in ["100", "500", "30"]) else 0.0001)
-        buf_price = buf_pips * pip_scale
-
-        fill_entry = cur_price
-        if direction == 1:
-            candidate_sl = round(sweep_extreme - buf_price, fmt_digits)
-            candidate_tp = orig_tp
-        else:
-            candidate_sl = round(sweep_extreme + buf_price, fmt_digits)
-            candidate_tp = orig_tp
-
-        candidate_sl_dist = abs(fill_entry - candidate_sl)
-        if candidate_sl_dist <= 0:
-            still_pending[ref_key] = item
+        if soup_label in ledger.data and ledger.data[soup_label].get("status") == "open":
+            log.info("TURTLE_SOUP_ALREADY_OPEN: ref=%s %s %s already open in ledger", ref_key, symbol, soup_label)
             continue
 
-        target_dist = abs(candidate_tp - fill_entry)
-        target_rr = target_dist / candidate_sl_dist
+        # 8. Compute Stop Loss with 3.5 pip buffer and Enforced Minimum Stop Floor
+        buf_pips = getattr(config, "TURTLE_SOUP_SL_BUFFER_PIPS", 3.5)
+        if "JPY" in symbol:
+            pip_scale = 0.01
+        elif symbol == "XAUUSD":
+            pip_scale = 0.1
+        elif any(idx in symbol for idx in ["100", "500", "30"]):
+            pip_scale = 1.0
+        else:
+            pip_scale = 0.0001
+        buf_price = buf_pips * pip_scale
 
-        # 5. Dynamic Lot Sizing based on portfolio risk budget (6%)
-        risk_usd = rm.balance * rm.risk_pct / 100.0
+        min_floors = getattr(config, "TURTLE_SOUP_MIN_STOP_FLOOR", {})
+        min_stop_floor = min_floors.get(symbol, 5.0 * pip_scale)
+
+        fill_entry = cur_price
+        target_mode = getattr(config, "TURTLE_SOUP_TARGET_MODE", "ORIGINAL_ENTRY")
+        candidate_tp = orig_entry if target_mode == "ORIGINAL_ENTRY" else orig_tp
+
+        if direction == 1:
+            raw_sl = sweep_extreme - buf_price
+            raw_sl_dist = fill_entry - raw_sl
+            candidate_sl_dist = max(raw_sl_dist, min_stop_floor)
+            candidate_sl = round(fill_entry - candidate_sl_dist, fmt_digits)
+            target_dist = candidate_tp - fill_entry
+        else:
+            raw_sl = sweep_extreme + buf_price
+            raw_sl_dist = raw_sl - fill_entry
+            candidate_sl_dist = max(raw_sl_dist, min_stop_floor)
+            candidate_sl = round(fill_entry + candidate_sl_dist, fmt_digits)
+            target_dist = fill_entry - candidate_tp
+
+        if target_dist <= 0 or candidate_sl_dist <= 0:
+            log.info("TURTLE_SOUP_TARGET_INVALID: ref=%s %s target_dist=%.5f sl_dist=%.5f — expiring",
+                     ref_key, symbol, target_dist, candidate_sl_dist)
+            continue
+
+        target_rr = target_dist / candidate_sl_dist
+        if target_rr < 0.5:
+            log.info("TURTLE_SOUP_RR_TOO_LOW: ref=%s %s target_rr=%.2f < 0.5 — expiring", ref_key, symbol, target_rr)
+            continue
+
+        # 9. Dynamic Lot Sizing governed strictly by Weekly Step-Compounding Anchor at 3.5% Risk
+        if getattr(config, "STEP_COMPOUNDING_ENABLED", True):
+            from engine.risk import get_or_update_anchor_balance
+            anchor_bal = get_or_update_anchor_balance()
+            rm.balance = anchor_bal
+
+        risk_pct = getattr(config, "RISK_PER_TRADE", 3.5)
+        risk_usd = rm.balance * (risk_pct / 100.0)
+
         lots_raw = position_size(symbol, risk_usd, candidate_sl_dist)
         lots = floor_lots(symbol, lots_raw)
         min_lot = float(c_info.get("min_lot", 0.01))
@@ -1665,8 +1788,18 @@ def process_pending_turtle_soup(ledger) -> int:
         if lots < min_lot:
             lots = min_lot
 
-        dollar_risk = lots * (candidate_sl_dist / point) * pip_val
+        from engine.risk import risk_amount
+        dollar_risk = risk_amount(symbol, lots, candidate_sl_dist)
 
+        # Verify cumulative open portfolio risk budget (65%)
+        total_open_risk_usd = sum(float(e.get("risk_usd", 0.0)) for e in open_entries.values())
+        if rm.balance > 0 and ((total_open_risk_usd + dollar_risk) / rm.balance * 100.0) > max_port_risk:
+            log.warning("TURTLE_SOUP_PORTFOLIO_RISK_CAP: ref=%s %s open risk %.1f%% would exceed max %.1f%% — holding in queue",
+                        ref_key, symbol, (total_open_risk_usd + dollar_risk) / rm.balance * 100.0, max_port_risk)
+            still_pending[ref_key] = item
+            continue
+
+        # 10. Execute Order
         try:
             fill = ex.place_market_order(symbol, direction, lots, fill_entry, candidate_sl, candidate_tp, soup_label)
         except Exception as e:
@@ -1686,6 +1819,7 @@ def process_pending_turtle_soup(ledger) -> int:
             "direction": direction,
             "lots": lots,
             "fill_price": fill.fill_price,
+            "entry": fill.fill_price,
             "sl": candidate_sl,
             "orig_sl": orig_sl,
             "tp": candidate_tp,
@@ -1713,11 +1847,12 @@ def process_pending_turtle_soup(ledger) -> int:
             f"🐢 <b>TURTLE SOUP INDUCEMENT RE-ENTRY</b> {d_str} {emoji}\n"
             f"{'─' * 28}\n"
             f"<b>Asset:</b> {symbol}\n"
-            f"<b>Original Setup:</b> #{ref_key} (Liquidity Sweep Reclaimed)\n"
+            f"<b>Original Setup:</b> #{ref_key} (Breaker Block Reclaimed)\n"
             f"<b>Sweep Depth:</b> {overshoot_r:.2f}R ({overshoot_pips:.1f} pips)\n"
             f"<b>Fill:</b> {fill.fill_price:.{fmt_digits}f} · {lots:.2f} lots\n"
-            f"<b>Tight SL:</b> {candidate_sl:.{fmt_digits}f} (Behind sweep wick)\n"
-            f"<b>Target TP:</b> {candidate_tp:.{fmt_digits}f} · <b>Target RR: 1:{target_rr:.2f}</b>\n"
+            f"<b>Protected SL:</b> {candidate_sl:.{fmt_digits}f} (Floor + Buffer Shield)\n"
+            f"<b>Target TP:</b> {candidate_tp:.{fmt_digits}f} (Original Entry)\n"
+            f"<b>Target RR: 1:{target_rr:.2f}</b> · Risk: ${dollar_risk:.2f} (3.5%)\n"
             f"<b>Ticket:</b> <code>{fill.order_id}</code>\n"
             f"<b>Broker:</b> {fill.broker} · {fill.ts}\n"
             f"{'─' * 28}\n"
