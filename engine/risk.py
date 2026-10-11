@@ -182,10 +182,10 @@ class RiskManager:
             self.realized_wr = realized_wr
 
         msgs: list[str] = []
-        if self.consecutive_losses >= self.max_cons:
+        if getattr(config, "CIRCUIT_BREAKER_ENABLED", False) and self.consecutive_losses >= self.max_cons:
             return RiskDecision(False, 0.0, 0.0, 0.0, "circuit-breaker",
                                 [f"{self.consecutive_losses} straight losses - manual review required."])
-        if self.today_pnl_usd <= -self.balance * self.daily_loss_pct / 100:
+        if getattr(config, "DAILY_LOSS_LIMIT_ENABLED", False) and self.today_pnl_usd <= -self.balance * self.daily_loss_pct / 100:
             return RiskDecision(False, 0.0, 0.0, 0.0, "daily-loss-limit",
                                 [f"Daily loss limit ({self.daily_loss_pct}%) hit. Trading halted until tomorrow."])
 

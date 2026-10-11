@@ -41,8 +41,10 @@ ACCOUNT_BALANCE         = float(os.getenv("ACCOUNT_BALANCE", "100.0"))
 DYNAMIC_BALANCE         = os.getenv("DYNAMIC_BALANCE", "0") == "1"   # 0 = Disabled in favor of Step-Compounding
 RISK_PER_TRADE          = float(os.getenv("RISK_PER_TRADE", "3.5"))   # % of anchor balance at risk per trade (3.0% - 4.0% range)
 MAX_RISK_PER_TRADE      = float(os.getenv("MAX_RISK_PER_TRADE", "4.0"))  # 4.0% hard cap
-DAILY_LOSS_LIMIT        = float(os.getenv("DAILY_LOSS_LIMIT", "12.0"))  # % of anchor balance -> stop trading for the day (3 losses max)
-MAX_CONSECUTIVE_LOSSES  = int(os.getenv("MAX_CONSECUTIVE_LOSSES", "3"))
+DAILY_LOSS_LIMIT_ENABLED = os.getenv("DAILY_LOSS_LIMIT_ENABLED", "0") == "1" # 0 = Disabled per user directive
+DAILY_LOSS_LIMIT        = float(os.getenv("DAILY_LOSS_LIMIT", "100.0")) # 100% (no daily loss cutoff)
+CIRCUIT_BREAKER_ENABLED = os.getenv("CIRCUIT_BREAKER_ENABLED", "0") == "1" # 0 = Disabled (no session cooldown)
+MAX_CONSECUTIVE_LOSSES  = int(os.getenv("MAX_CONSECUTIVE_LOSSES", "99"))
 KELLY_FRACTION          = float(os.getenv("KELLY_FRACTION", "0.25"))   # scaled kelly cap
 
 # ---- Step-Compounding (Milestone / Weekly Anchor Sizing) ----
