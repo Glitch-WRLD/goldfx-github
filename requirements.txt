@@ -5,3 +5,5 @@ python-dotenv
 pandas
 numpy
 pyarrow
+httpx
+MetaTrader5
