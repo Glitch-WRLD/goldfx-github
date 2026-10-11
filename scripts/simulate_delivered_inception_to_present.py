@@ -173,6 +173,11 @@ def is_setup_filtered(h: dict, news_events: list[dict], dxy_series: pd.Series | 
 def evaluate_hardened_turtle_soup(sym: str, dir_val: int, orig_entry: float, orig_sl: float, orig_tp: float,
                                   sl_ts: pd.Timestamp, df_m5: pd.DataFrame, news_events: list[dict]) -> dict | None:
     """Evaluate whether a full SL setup triggers a confirmed Hardened Turtle Soup re-entry."""
+    # 0. Symbol Exemption: Indices exempt from Turtle Soup re-entries (Forex & Gold focus)
+    exempt_symbols = getattr(config, "TURTLE_SOUP_EXEMPT_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"})
+    if sym in exempt_symbols:
+        return None
+
     sl_dist = abs(orig_entry - orig_sl)
     if sl_dist <= 0:
         return None
@@ -377,7 +382,8 @@ def run_full_simulation():
 
         df_m5 = dfs_m5[sym]
 
-        # Determine outcome under Active Trade Management (BE@0.8R)
+        # Determine outcome under Active Trade Management / Pure Hold
+        be_enabled = getattr(config, "BREAKEVEN_ENABLED", False)
         if bot_hit == "tp":
             # Authenticated TP win
             base_executed.append({
@@ -385,29 +391,43 @@ def run_full_simulation():
                 "dir": dir_val, "hit": "tp", "pnl_r": orig_rr, "type": "BASE"
             })
         else:
-            # Baseline hit SL. Check if Breakeven (0.8R) saved it from loss!
-            bars_during = df_m5.loc[(df_m5.index >= ts) & (df_m5.index <= sl_ts)]
-            peak_mfe = 0.0
-            if len(bars_during) > 0 and sl_dist > 0:
-                for _, b in bars_during.iterrows():
-                    mfe = (float(b["high"]) - entry) / sl_dist if dir_val == 1 else (entry - float(b["low"])) / sl_dist
-                    if mfe > peak_mfe:
-                        peak_mfe = mfe
+            # Baseline hit SL
+            if be_enabled:
+                bars_during = df_m5.loc[(df_m5.index >= ts) & (df_m5.index <= sl_ts)]
+                peak_mfe = 0.0
+                if len(bars_during) > 0 and sl_dist > 0:
+                    for _, b in bars_during.iterrows():
+                        mfe = (float(b["high"]) - entry) / sl_dist if dir_val == 1 else (entry - float(b["low"])) / sl_dist
+                        if mfe > peak_mfe:
+                            peak_mfe = mfe
 
-            if peak_mfe >= 0.80:
-                # Giveback saved by Breakeven! Exits at 0.0R
-                be_saved_count += 1
-                base_executed.append({
-                    "ref": ref, "symbol": sym, "ts": ts, "exit_ts": sl_ts,
-                    "dir": dir_val, "hit": "be", "pnl_r": 0.0, "type": "BASE"
-                })
+                if peak_mfe >= 0.80:
+                    # Giveback saved by Breakeven! Exits at 0.0R
+                    be_saved_count += 1
+                    base_executed.append({
+                        "ref": ref, "symbol": sym, "ts": ts, "exit_ts": sl_ts,
+                        "dir": dir_val, "hit": "be", "pnl_r": 0.0, "type": "BASE"
+                    })
+                else:
+                    base_executed.append({
+                        "ref": ref, "symbol": sym, "ts": ts, "exit_ts": sl_ts,
+                        "dir": dir_val, "hit": "sl", "pnl_r": -1.0, "type": "BASE"
+                    })
+                    # Phase 2: Evaluate Hardened Turtle Soup Re-Entry
+                    ts_res = evaluate_hardened_turtle_soup(sym, dir_val, entry, sl, tp, sl_ts, df_m5, news_events)
+                    if ts_res is not None:
+                        ts_executed.append({
+                            "ref": f"soup_{ref}", "parent_ref": ref, "symbol": sym,
+                            "ts": ts_res["ts"], "exit_ts": ts_res["exit_ts"], "hit": ts_res["hit"],
+                            "pnl_r": ts_res["pnl_r"], "rr": ts_res["rr"], "type": "TURTLE_SOUP",
+                            "overshoot_r": ts_res["overshoot_r"]
+                        })
             else:
-                # Full Stop Loss (-1.0R)
+                # Pure Hold (Production Default): Full Stop Loss (-1.0R)
                 base_executed.append({
                     "ref": ref, "symbol": sym, "ts": ts, "exit_ts": sl_ts,
                     "dir": dir_val, "hit": "sl", "pnl_r": -1.0, "type": "BASE"
                 })
-
                 # Phase 2: Evaluate Hardened Turtle Soup Re-Entry
                 ts_res = evaluate_hardened_turtle_soup(sym, dir_val, entry, sl, tp, sl_ts, df_m5, news_events)
                 if ts_res is not None:

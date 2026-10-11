@@ -740,19 +740,24 @@ def manage_open_positions(ledger) -> int:
                             if getattr(config, "TURTLE_SOUP_REENTRY_ENABLED", True) and not str(ref).startswith("soup_"):
                                 try:
                                     sym_val = pos.get("symbol", "")
-                                    is_news_bo = False
-                                    if getattr(config, "TURTLE_SOUP_NEWS_BLACKOUT", True):
-                                        try:
-                                            from engine.news import get_active_news_blackout
-                                            is_news_bo, bo_reason, _ = get_active_news_blackout(sym_val, buffer_before_min=20, buffer_after_min=20)
-                                        except Exception as e_news:
-                                            log.warning("News check failed during turtle soup enqueue ref=%s: %s", ref, e_news)
-
-                                    if is_news_bo:
-                                        log.info("TURTLE_SOUP_NEWS_BYPASS: ref=%s %s stopped out during Tier-1 news (%s) — skipping TS enqueue",
-                                                 ref, sym_val, bo_reason)
+                                    exempt_symbols = getattr(config, "TURTLE_SOUP_EXEMPT_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"})
+                                    if sym_val in exempt_symbols:
+                                        log.info("TURTLE_SOUP_EXEMPT: ref=%s %s is in exempt symbols (indices cascade on trend breaks) — skipping TS enqueue",
+                                                 ref, sym_val)
                                     else:
-                                        pending_soup = _load_pending_turtle_soup()
+                                        is_news_bo = False
+                                        if getattr(config, "TURTLE_SOUP_NEWS_BLACKOUT", True):
+                                            try:
+                                                from engine.news import get_active_news_blackout
+                                                is_news_bo, bo_reason, _ = get_active_news_blackout(sym_val, buffer_before_min=20, buffer_after_min=20)
+                                            except Exception as e_news:
+                                                log.warning("News check failed during turtle soup enqueue ref=%s: %s", ref, e_news)
+
+                                        if is_news_bo:
+                                            log.info("TURTLE_SOUP_NEWS_BYPASS: ref=%s %s stopped out during Tier-1 news (%s) — skipping TS enqueue",
+                                                     ref, sym_val, bo_reason)
+                                        else:
+                                            pending_soup = _load_pending_turtle_soup()
                                         ref_str = str(ref)
                                         if ref_str not in pending_soup:
                                             fill_price_val = float(pos.get("fill_price", 0.0) or pos.get("entry", 0.0))
@@ -1567,6 +1572,9 @@ def process_pending_turtle_soup(ledger) -> int:
 
     for ref_key, item in list(pending.items()):
         symbol = item["symbol"]
+        exempt_symbols = getattr(config, "TURTLE_SOUP_EXEMPT_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"})
+        if symbol in exempt_symbols:
+            continue
         direction = int(item["direction"])
         orig_entry = float(item["original_entry"])
         orig_sl = float(item["original_sl"])
@@ -2811,7 +2819,23 @@ def run_agent():
             tick()
         except Exception as e:
             log.error("tick error: %s", e, exc_info=True)
-        time.sleep(interval)
+
+        # High-frequency 1-second subcycle for pending Turtle Soup setups (cuts slippage from ~1.5 pips to ~0.1 pip)
+        pending_soup = _load_pending_turtle_soup()
+        if pending_soup:
+            for _ in range(interval):
+                time.sleep(1)
+                try:
+                    ledger = load_ledger()
+                    soup_filled = process_pending_turtle_soup(ledger)
+                    if soup_filled:
+                        log.info("FAST_POLL: Turtle Soup re-entry filled instantly during 1s subcycle!")
+                except Exception as ef:
+                    log.error("fast_poll error: %s", ef)
+                if not _load_pending_turtle_soup():
+                    break
+        else:
+            time.sleep(interval)
 
 
 if __name__ == "__main__":

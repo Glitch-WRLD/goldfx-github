@@ -231,6 +231,8 @@ TURTLE_SOUP_SL_BUFFER_PIPS  = float(os.getenv("TURTLE_SOUP_SL_BUFFER_PIPS", "3.5
 TURTLE_SOUP_MIN_WICK_RATIO  = float(os.getenv("TURTLE_SOUP_MIN_WICK_RATIO", "0.50")) # Sweep candle wick ratio >= 50% or body closed inside
 TURTLE_SOUP_TARGET_MODE     = os.getenv("TURTLE_SOUP_TARGET_MODE", "ORIGINAL_ENTRY") # Target Original Entry; closed instantly via LOCAL_TP_GUARD
 TURTLE_SOUP_NEWS_BLACKOUT   = os.getenv("TURTLE_SOUP_NEWS_BLACKOUT", "1") == "1"     # 1 = Bypasses any SL within +-20 mins of Tier-1 news
+# Restrict Turtle Soup re-entries to Forex pairs & Gold (Indices cascade on trend breaks rather than range-sweeps)
+TURTLE_SOUP_EXEMPT_SYMBOLS  = set(os.getenv("TURTLE_SOUP_EXEMPT_SYMBOLS", "NASDAQ-100,US500,DJ30").split(","))
 
 # Physical broker & spread buffer minimum stop floors per symbol (prevents micro-stop artifacts)
 TURTLE_SOUP_MIN_STOP_FLOOR  = {
