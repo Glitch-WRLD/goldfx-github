@@ -236,6 +236,26 @@ class Mt5Broker:
                             symbol, vol_min, calc_m * (vol_min / float(lots)), free_margin
                         )
 
+        # Directional SL/TP sanity check to prevent inverted orders (e.g. SELL with TP >= entry)
+        if direction == 1:
+            if sl > 0 and sl >= price:
+                log.error("ORDER_SANITY_REJECT: BUY %s sl=%.5f >= price=%.5f", symbol, sl, price)
+                return Fill(ok=False, symbol=symbol, direction=direction, lots=lots,
+                            message=f"ORDER_SANITY_REJECT: BUY sl={sl} >= price={price}")
+            if tp > 0 and tp <= price:
+                log.error("ORDER_SANITY_REJECT: BUY %s tp=%.5f <= price=%.5f (inverted TP)", symbol, tp, price)
+                return Fill(ok=False, symbol=symbol, direction=direction, lots=lots,
+                            message=f"ORDER_SANITY_REJECT: BUY tp={tp} <= price={price}")
+        else:
+            if sl > 0 and sl <= price:
+                log.error("ORDER_SANITY_REJECT: SELL %s sl=%.5f <= price=%.5f", symbol, sl, price)
+                return Fill(ok=False, symbol=symbol, direction=direction, lots=lots,
+                            message=f"ORDER_SANITY_REJECT: SELL sl={sl} <= price={price}")
+            if tp > 0 and tp >= price:
+                log.error("ORDER_SANITY_REJECT: SELL %s tp=%.5f >= price=%.5f (inverted TP)", symbol, tp, price)
+                return Fill(ok=False, symbol=symbol, direction=direction, lots=lots,
+                            message=f"ORDER_SANITY_REJECT: SELL tp={tp} >= price={price}")
+
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": symbol,
@@ -409,8 +429,9 @@ class Mt5Broker:
             return Fill(ok=True, symbol=symbol, direction=direction, lots=lots,
                         order_id="none", broker="mt5",
                         message=f"MT5 no open position for {symbol} to close")
+        expected_type = 0 if direction == 1 else 1  # 0 is BUY, 1 is SELL
         for pos in positions:
-            if getattr(pos, "type", None) == (1 if direction == 1 else 0):
+            if getattr(pos, "type", None) == expected_type:
                 return self.close_position_by_ticket(pos.ticket)
         return Fill(ok=True, symbol=symbol, direction=direction, lots=lots,
                     order_id="none", broker="mt5",

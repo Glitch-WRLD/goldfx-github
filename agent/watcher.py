@@ -310,8 +310,16 @@ def _is_rollover_blackout() -> bool:
 
 
 def _is_prerollover_window() -> bool:
-    """True if within the 15-minute pre-rollover de-risking window (23:30 - 23:45 UTC)."""
-    now_utc = _utcnow().time()
+    """True if within the 15-minute pre-rollover de-risking window (23:30 - 23:45 UTC).
+    On Friday, activates early at 20:30 - 21:00 UTC ahead of broker market close to prevent trades being stranded over the weekend.
+    """
+    now_dt = _utcnow()
+    # On Friday (weekday == 4), market closes early (~21:00-22:00 UTC). De-risk at 20:30-21:00 UTC.
+    if now_dt.weekday() == 4:
+        curr_min = now_dt.hour * 60 + now_dt.minute
+        return (20 * 60 + 30) <= curr_min < (21 * 60)
+
+    now_utc = now_dt.time()
     try:
         sh, sm = [int(x) for x in getattr(config, "ROLLOVER_START_UTC", "23:45").split(":")]
         start_min = sh * 60 + sm
@@ -745,44 +753,50 @@ def manage_open_positions(ledger) -> int:
                                         log.info("TURTLE_SOUP_EXEMPT: ref=%s %s is in exempt symbols (indices cascade on trend breaks) — skipping TS enqueue",
                                                  ref, sym_val)
                                     else:
-                                        is_news_bo = False
-                                        if getattr(config, "TURTLE_SOUP_NEWS_BLACKOUT", True):
-                                            try:
-                                                from engine.news import get_active_news_blackout
-                                                is_news_bo, bo_reason, _ = get_active_news_blackout(sym_val, buffer_before_min=20, buffer_after_min=20)
-                                            except Exception as e_news:
-                                                log.warning("News check failed during turtle soup enqueue ref=%s: %s", ref, e_news)
-
-                                        if is_news_bo:
-                                            log.info("TURTLE_SOUP_NEWS_BYPASS: ref=%s %s stopped out during Tier-1 news (%s) — skipping TS enqueue",
-                                                     ref, sym_val, bo_reason)
+                                        from engine.scanner import is_weakling_filtered
+                                        is_weak, weak_reason = is_weakling_filtered(sym_val)
+                                        if is_weak:
+                                            log.info("TURTLE_SOUP_SESSION_BYPASS: ref=%s %s stopped out during blackout session (%s) — skipping TS enqueue",
+                                                     ref, sym_val, weak_reason)
                                         else:
-                                            pending_soup = _load_pending_turtle_soup()
-                                        ref_str = str(ref)
-                                        if ref_str not in pending_soup:
-                                            fill_price_val = float(pos.get("fill_price", 0.0) or pos.get("entry", 0.0))
-                                            sl_price_val = float(pos.get("sl", 0.0))
-                                            tp_price_val = float(pos.get("tp", 0.0))
-                                            sl_dist_val = abs(fill_price_val - sl_price_val)
-                                            direction_val = int(pos.get("direction", 1))
-                                            if sl_dist_val > 0 and tp_price_val > 0:
-                                                pending_soup[ref_str] = {
-                                                    "ref": ref,
-                                                    "symbol": sym_val,
-                                                    "direction": direction_val,
-                                                    "original_entry": fill_price_val,
-                                                    "original_sl": sl_price_val,
-                                                    "original_tp": tp_price_val,
-                                                    "sl_dist": sl_dist_val,
-                                                    "risk_usd": float(pos.get("risk_usd", 100.0)),
-                                                    "exit_price": float(exit_price),
-                                                    "sweep_extreme": float(exit_price),
-                                                    "exit_ts": _utcnow().isoformat(),
-                                                    "profile": pos.get("profile", ""),
-                                                }
-                                                _save_pending_turtle_soup(pending_soup)
-                                                log.info("TURTLE_SOUP_ENQUEUED: ref=%s symbol=%s dir=%d SL=%.5f exit=%.5f (monitoring for inducement sweep re-entry)",
-                                                         ref_str, sym_val, direction_val, sl_price_val, exit_price)
+                                            is_news_bo = False
+                                            if getattr(config, "TURTLE_SOUP_NEWS_BLACKOUT", True):
+                                                try:
+                                                    from engine.news import get_active_news_blackout
+                                                    is_news_bo, bo_reason, _ = get_active_news_blackout(sym_val, buffer_before_min=20, buffer_after_min=20)
+                                                except Exception as e_news:
+                                                    log.warning("News check failed during turtle soup enqueue ref=%s: %s", ref, e_news)
+
+                                            if is_news_bo:
+                                                log.info("TURTLE_SOUP_NEWS_BYPASS: ref=%s %s stopped out during Tier-1 news (%s) — skipping TS enqueue",
+                                                         ref, sym_val, bo_reason)
+                                            else:
+                                                pending_soup = _load_pending_turtle_soup()
+                                                ref_str = str(ref)
+                                                if ref_str not in pending_soup:
+                                                    fill_price_val = float(pos.get("fill_price", 0.0) or pos.get("entry", 0.0))
+                                                    sl_price_val = float(pos.get("sl", 0.0))
+                                                    tp_price_val = float(pos.get("tp", 0.0))
+                                                    sl_dist_val = abs(fill_price_val - sl_price_val)
+                                                    direction_val = int(pos.get("direction", 1))
+                                                    if sl_dist_val > 0 and tp_price_val > 0:
+                                                        pending_soup[ref_str] = {
+                                                            "ref": ref,
+                                                            "symbol": sym_val,
+                                                            "direction": direction_val,
+                                                            "original_entry": fill_price_val,
+                                                            "original_sl": sl_price_val,
+                                                            "original_tp": tp_price_val,
+                                                            "sl_dist": sl_dist_val,
+                                                            "risk_usd": float(pos.get("risk_usd", 100.0)),
+                                                            "exit_price": float(exit_price),
+                                                            "sweep_extreme": float(exit_price),
+                                                            "exit_ts": _utcnow().isoformat(),
+                                                            "profile": pos.get("profile", ""),
+                                                        }
+                                                        _save_pending_turtle_soup(pending_soup)
+                                                        log.info("TURTLE_SOUP_ENQUEUED: ref=%s symbol=%s dir=%d SL=%.5f exit=%.5f (monitoring for inducement sweep re-entry)",
+                                                                 ref_str, sym_val, direction_val, sl_price_val, exit_price)
                                 except Exception as e:
                                     log.warning("Failed to enqueue turtle soup for ref=%s: %s", ref, e)
                         else:
@@ -1575,6 +1589,14 @@ def process_pending_turtle_soup(ledger) -> int:
         exempt_symbols = getattr(config, "TURTLE_SOUP_EXEMPT_SYMBOLS", {"NASDAQ-100", "US500", "DJ30"})
         if symbol in exempt_symbols:
             continue
+
+        # Session Blackout Check (e.g. Sunday Market Open 18:00-23:59 UTC, Thursday Asian, etc.)
+        from engine.scanner import is_weakling_filtered
+        is_weak, weak_reason = is_weakling_filtered(symbol)
+        if is_weak:
+            log.info("TURTLE_SOUP_SESSION_EXPIRED: ref=%s %s in blackout session (%s) — cancelling re-entry",
+                     ref_key, symbol, weak_reason)
+            continue
         direction = int(item["direction"])
         orig_entry = float(item["original_entry"])
         orig_sl = float(item["original_sl"])
@@ -1763,12 +1785,20 @@ def process_pending_turtle_soup(ledger) -> int:
             candidate_sl_dist = max(raw_sl_dist, min_stop_floor)
             candidate_sl = round(fill_entry - candidate_sl_dist, fmt_digits)
             target_dist = candidate_tp - fill_entry
+            if candidate_tp <= fill_entry:
+                log.info("TURTLE_SOUP_TARGET_INVALID: ref=%s %s BUY candidate_tp=%.5f <= fill_entry=%.5f (inverted) — expiring",
+                         ref_key, symbol, candidate_tp, fill_entry)
+                continue
         else:
             raw_sl = sweep_extreme + buf_price
             raw_sl_dist = raw_sl - fill_entry
             candidate_sl_dist = max(raw_sl_dist, min_stop_floor)
             candidate_sl = round(fill_entry + candidate_sl_dist, fmt_digits)
             target_dist = fill_entry - candidate_tp
+            if candidate_tp >= fill_entry:
+                log.info("TURTLE_SOUP_TARGET_INVALID: ref=%s %s SELL candidate_tp=%.5f >= fill_entry=%.5f (inverted) — expiring",
+                         ref_key, symbol, candidate_tp, fill_entry)
+                continue
 
         if target_dist <= 0 or candidate_sl_dist <= 0:
             log.info("TURTLE_SOUP_TARGET_INVALID: ref=%s %s target_dist=%.5f sl_dist=%.5f — expiring",
@@ -1819,6 +1849,21 @@ def process_pending_turtle_soup(ledger) -> int:
             log.warning("Turtle soup order rejected ref=%s: %s", ref_key, fill.message[:200])
             still_pending[ref_key] = item
             continue
+
+        # Post-fill slippage guard: If actual fill slipped past TP, clear inverted TP in MT5!
+        real_fill = float(fill.fill_price) if fill.fill_price else fill_entry
+        if direction == 1 and real_fill >= candidate_tp:
+            log.warning("TURTLE_SOUP_SLIP_INVERSION: ref=%s BUY filled @ %.5f >= TP %.5f. Removing inverted TP in MT5.",
+                        ref_key, real_fill, candidate_tp)
+            if hasattr(ex, "modify_sl_tp") and fill.order_id:
+                ex.modify_sl_tp(int(fill.order_id), candidate_sl, 0.0)
+            candidate_tp = 0.0
+        elif direction == -1 and real_fill <= candidate_tp:
+            log.warning("TURTLE_SOUP_SLIP_INVERSION: ref=%s SELL filled @ %.5f <= TP %.5f. Removing inverted TP in MT5.",
+                        ref_key, real_fill, candidate_tp)
+            if hasattr(ex, "modify_sl_tp") and fill.order_id:
+                ex.modify_sl_tp(int(fill.order_id), candidate_sl, 0.0)
+            candidate_tp = 0.0
 
         # Record in ledger
         ledger.data[str(soup_label)] = {
