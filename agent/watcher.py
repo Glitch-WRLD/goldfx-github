@@ -1264,13 +1264,17 @@ def process_pending_retracements(ledger) -> int:
 
     ex = get_executor()
     rm = risk()
-    if getattr(config, "DYNAMIC_BALANCE", True):
+    if getattr(config, "STEP_COMPOUNDING_ENABLED", True) or getattr(config, "DYNAMIC_BALANCE", False):
         try:
             if hasattr(ex, "account_snapshot"):
                 snap = ex.account_snapshot()
                 live_bal = float(snap.get("balance", 0.0))
                 if live_bal and live_bal > 0:
-                    rm.balance = live_bal
+                    if getattr(config, "STEP_COMPOUNDING_ENABLED", True):
+                        from engine.risk import get_or_update_anchor_balance
+                        rm.balance = get_or_update_anchor_balance(live_bal)
+                    else:
+                        rm.balance = live_bal
         except Exception:
             pass
     now = time.time()
@@ -2552,13 +2556,17 @@ def tick() -> bool:
     rm = risk()
     ex = get_executor()
 
-    if getattr(config, "DYNAMIC_BALANCE", True):
+    if getattr(config, "STEP_COMPOUNDING_ENABLED", True) or getattr(config, "DYNAMIC_BALANCE", False):
         try:
             if hasattr(ex, "account_snapshot"):
                 snap = ex.account_snapshot()
                 live_bal = float(snap.get("balance", 0.0))
                 if live_bal and live_bal > 0:
-                    rm.balance = live_bal
+                    if getattr(config, "STEP_COMPOUNDING_ENABLED", True):
+                        from engine.risk import get_or_update_anchor_balance
+                        rm.balance = get_or_update_anchor_balance(live_bal)
+                    else:
+                        rm.balance = live_bal
         except Exception:
             pass
 

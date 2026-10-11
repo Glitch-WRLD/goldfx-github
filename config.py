@@ -37,13 +37,20 @@ AGENT_BOT_TOKEN = os.getenv("AGENT_BOT_TOKEN", BOT_TOKEN)
 AGENT_CHAT_ID = os.getenv("AGENT_CHAT_ID", CHAT_ID)
 
 # ---- Risk / money mgmt (from trader-quality research) ----
-ACCOUNT_BALANCE = float(os.getenv("ACCOUNT_BALANCE", "100.0"))
-DYNAMIC_BALANCE = os.getenv("DYNAMIC_BALANCE", "1") == "1"   # dynamically read live balance from MT5/broker
-RISK_PER_TRADE = float(os.getenv("RISK_PER_TRADE", "6.0"))   # % of balance at risk per trade
-MAX_RISK_PER_TRADE = float(os.getenv("MAX_RISK_PER_TRADE", "8.0"))  # hard cap
-DAILY_LOSS_LIMIT = float(os.getenv("DAILY_LOSS_LIMIT", "18.0"))  # % of balance -> stop trading for the day (3 losses max)
-MAX_CONSECUTIVE_LOSSES = int(os.getenv("MAX_CONSECUTIVE_LOSSES", "3"))
-KELLY_FRACTION = float(os.getenv("KELLY_FRACTION", "0.25"))   # scaled kelly cap
+ACCOUNT_BALANCE         = float(os.getenv("ACCOUNT_BALANCE", "100.0"))
+DYNAMIC_BALANCE         = os.getenv("DYNAMIC_BALANCE", "0") == "1"   # 0 = Disabled in favor of Step-Compounding
+RISK_PER_TRADE          = float(os.getenv("RISK_PER_TRADE", "3.5"))   # % of anchor balance at risk per trade (3.0% - 4.0% range)
+MAX_RISK_PER_TRADE      = float(os.getenv("MAX_RISK_PER_TRADE", "4.0"))  # 4.0% hard cap
+DAILY_LOSS_LIMIT        = float(os.getenv("DAILY_LOSS_LIMIT", "12.0"))  # % of anchor balance -> stop trading for the day (3 losses max)
+MAX_CONSECUTIVE_LOSSES  = int(os.getenv("MAX_CONSECUTIVE_LOSSES", "3"))
+KELLY_FRACTION          = float(os.getenv("KELLY_FRACTION", "0.25"))   # scaled kelly cap
+
+# ---- Step-Compounding (Milestone / Weekly Anchor Sizing) ----
+# Eliminates the Asymmetric Dollar Risk Trap (peak-sizing vs valley-sizing):
+# All trades during the week risk a fixed dollar amount based on the week-start settled balance.
+STEP_COMPOUNDING_ENABLED = os.getenv("STEP_COMPOUNDING_ENABLED", "1") == "1" # 1 = Enable weekly step-compounding
+STEP_COMPOUNDING_MODE    = os.getenv("STEP_COMPOUNDING_MODE", "WEEKLY")      # "WEEKLY" anchor
+STEP_DRAWDOWN_RESET_PCT  = float(os.getenv("STEP_DRAWDOWN_RESET_PCT", "25.0"))# Emergency step-down if live equity drops > 25%
 
 # ---- Gold Retracement Sniper (M5 Swing Anchor for small accounts) ----
 RETRACE_ENABLED = os.getenv("RETRACE_ENABLED", "1") == "1"

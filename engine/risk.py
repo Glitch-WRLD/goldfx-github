@@ -13,10 +13,112 @@ Encodes the qualities of consistently-profitable traders researched up front:
 
 from __future__ import annotations
 
+import datetime as dt
+import json
+import logging
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import config
+
+log = logging.getLogger("goldfx.risk")
+
+ANCHOR_FILE = config.DATA_CACHE / "risk_anchor.json"
+
+
+def get_current_week_key(t: dt.datetime | None = None) -> str:
+    """Return ISO year and week key, e.g. '2026-W41'."""
+    now = t or dt.datetime.now(dt.timezone.utc)
+    iso = now.isocalendar()
+    return f"{iso.year}-W{iso.week:02d}"
+
+
+def get_or_update_anchor_balance(live_balance: float | None = None) -> float:
+    """Retrieve or update the weekly step-compounding anchor balance.
+    Eliminates the Asymmetric Dollar Risk Trap (peak-sizing vs valley-sizing):
+    - Locks sizing balance to settled week-start equity so all trades during the week
+      risk an equal dollar amount (e.g. 3.5% of anchor).
+    - Automatically steps/rolls over when a new ISO trading week starts.
+    - Safety guard: steps down if live equity drops > 25% to protect capital during outlier drawdowns.
+    - Deposit guard: re-anchors if account balance jumps > 35% (external deposit/withdrawal).
+    """
+    default_bal = getattr(config, "ACCOUNT_BALANCE", 100.0)
+    current_week = get_current_week_key()
+    data: dict = {}
+
+    if ANCHOR_FILE.exists():
+        try:
+            data = json.loads(ANCHOR_FILE.read_text(encoding="utf-8"))
+        except Exception as e:
+            log.warning("failed to read %s: %s", ANCHOR_FILE, e)
+
+    stored_week = data.get("week_key")
+    stored_anchor = float(data.get("anchor_balance", 0.0))
+
+    # Initialize if empty or missing
+    if stored_anchor <= 0:
+        new_anchor = live_balance if (live_balance and live_balance > 0) else default_bal
+        data = {
+            "week_key": current_week,
+            "anchor_balance": round(new_anchor, 2),
+            "last_updated": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "reason": "initial_anchor",
+        }
+        try:
+            ANCHOR_FILE.parent.mkdir(exist_ok=True)
+            ANCHOR_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            log.info("STEP_COMPOUNDING: Initialized anchor balance to $%.2f for week %s.", new_anchor, current_week)
+        except Exception as e:
+            log.warning("failed to write %s: %s", ANCHOR_FILE, e)
+        return float(new_anchor)
+
+    # 1. Weekly rollover: New ISO week detected
+    if stored_week != current_week:
+        new_anchor = live_balance if (live_balance and live_balance > 0) else stored_anchor
+        data = {
+            "week_key": current_week,
+            "anchor_balance": round(new_anchor, 2),
+            "last_updated": dt.datetime.now(dt.timezone.utc).isoformat(),
+            "reason": f"weekly_rollover (from {stored_week})",
+        }
+        try:
+            ANCHOR_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+            log.info("STEP_COMPOUNDING: Weekly rollover from %s to %s. Anchor balance updated from $%.2f to $%.2f.",
+                     stored_week, current_week, stored_anchor, new_anchor)
+        except Exception as e:
+            log.warning("failed to write %s: %s", ANCHOR_FILE, e)
+        return float(new_anchor)
+
+    # 2. Drawdown safety trigger (> 25% below anchor)
+    dd_reset_pct = float(getattr(config, "STEP_DRAWDOWN_RESET_PCT", 25.0))
+    if live_balance and live_balance > 0:
+        if live_balance < stored_anchor * (1.0 - dd_reset_pct / 100.0):
+            data["anchor_balance"] = round(live_balance, 2)
+            data["last_updated"] = dt.datetime.now(dt.timezone.utc).isoformat()
+            data["reason"] = f"drawdown_safety_reset (hit >{dd_reset_pct:.0f}% drop)"
+            try:
+                ANCHOR_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                log.warning("STEP_COMPOUNDING_SAFETY: Drawdown exceeded %s%%. Stepping anchor down from $%.2f to $%.2f.",
+                            dd_reset_pct, stored_anchor, live_balance)
+            except Exception as e:
+                log.warning("failed to write %s: %s", ANCHOR_FILE, e)
+            return float(live_balance)
+
+        # 3. External deposit/withdrawal re-anchor (> 35% jump)
+        if live_balance > stored_anchor * 1.35 or live_balance < stored_anchor * 0.50:
+            data["anchor_balance"] = round(live_balance, 2)
+            data["last_updated"] = dt.datetime.now(dt.timezone.utc).isoformat()
+            data["reason"] = "capital_adjustment_reset"
+            try:
+                ANCHOR_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+                log.info("STEP_COMPOUNDING: Significant capital change detected. Anchor reset from $%.2f to $%.2f.",
+                         stored_anchor, live_balance)
+            except Exception as e:
+                log.warning("failed to write %s: %s", ANCHOR_FILE, e)
+            return float(live_balance)
+
+    return stored_anchor
 
 
 @dataclass
@@ -34,7 +136,12 @@ class RiskManager:
                  risk_pct: float | None = None,
                  daily_loss_limit_pct: float | None = None,
                  max_consecutive_losses: int | None = None):
-        self.balance = balance if balance is not None else config.ACCOUNT_BALANCE
+        if balance is not None:
+            self.balance = balance
+        elif getattr(config, "STEP_COMPOUNDING_ENABLED", True):
+            self.balance = get_or_update_anchor_balance()
+        else:
+            self.balance = config.ACCOUNT_BALANCE
         self.risk_pct = min(risk_pct if risk_pct is not None else config.RISK_PER_TRADE,
                             config.MAX_RISK_PER_TRADE)
         self.daily_loss_pct = daily_loss_limit_pct if daily_loss_limit_pct is not None else config.DAILY_LOSS_LIMIT
