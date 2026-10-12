@@ -1316,12 +1316,16 @@ def process_pending_retracements(ledger) -> int:
 
     for ref_key, item in pending.items():
         # Clean up: if ref_key is already filled/active on broker, do NOT re-process or falsely invalidate!
+        if hasattr(ex, "has_position_with_ref") and ex.has_position_with_ref(ref_key):
+            log.info("RETRACE_CLEANUP: ref=%s already active on broker; removing from pending queue.", ref_key)
+            continue
         if ledger.has(ref_key):
             pos_rec = ledger.data.get(str(ref_key), {})
             if pos_rec.get("status") == "open" or pos_rec.get("order_id"):
                 log.info("RETRACE_CLEANUP: ref=%s already active on broker (ticket %s); removing from pending queue.",
                          ref_key, pos_rec.get("order_id"))
                 continue
+
 
         symbol = item.get("symbol", "XAUUSD")
         direction = int(item.get("direction", 1))
@@ -1753,12 +1757,16 @@ def process_pending_turtle_soup(ledger) -> int:
             continue
 
         soup_label = f"soup_{ref_key}"
-        if hasattr(ex, "has_position_with_ref") and ex.has_position_with_ref(soup_label):
-            log.info("TURTLE_SOUP_ALREADY_OPEN: ref=%s %s %s already active in MT5", ref_key, symbol, soup_label)
+        if hasattr(ex, "has_position_with_ref") and (ex.has_position_with_ref(soup_label) or ex.has_position_with_ref(ref_key)):
+            log.info("TURTLE_SOUP_ALREADY_OPEN: ref=%s %s already active in MT5", ref_key, symbol)
             continue
         if soup_label in ledger.data and ledger.data[soup_label].get("status") == "open":
             log.info("TURTLE_SOUP_ALREADY_OPEN: ref=%s %s %s already open in ledger", ref_key, symbol, soup_label)
             continue
+        if any(e.get("symbol") == symbol and str(e.get("ref", "")).startswith("soup_") and e.get("status") == "open" for e in ledger.data.values()):
+            log.info("TURTLE_SOUP_ALREADY_OPEN: symbol %s already has an active soup position in ledger", symbol)
+            continue
+
 
         # 8. Compute Stop Loss with 3.5 pip buffer and Enforced Minimum Stop Floor
         buf_pips = getattr(config, "TURTLE_SOUP_SL_BUFFER_PIPS", 3.5)
@@ -1963,11 +1971,26 @@ def _execute_setup_entry(
                   symbol, ref_key, signal_ts)
         return False, active_open_count, at_risk_count
 
+    # Duplicate check: setup with identical symbol and signal_ts already pending retracement
+    pending_retrace = _load_pending_retrace()
+    if signal_ts and any(pos.get("symbol") == symbol and str(pos.get("signal_ts")) == signal_ts for pos in pending_retrace.values()):
+        log.debug("skip %s ref=%s — signal_ts %s already in pending retrace queue. Duplicate blocked.",
+                  symbol, ref_key, signal_ts)
+        return False, active_open_count, at_risk_count
+
+    # Duplicate check: setup with identical symbol and signal_ts already pending turtle soup
+    pending_soup = _load_pending_turtle_soup()
+    if signal_ts and any(pos.get("symbol") == symbol and str(pos.get("signal_ts")) == signal_ts for pos in pending_soup.values()):
+        log.debug("skip %s ref=%s — signal_ts %s already in pending turtle soup queue. Duplicate blocked.",
+                  symbol, ref_key, signal_ts)
+        return False, active_open_count, at_risk_count
+
     # Broker-level duplicate execution defense
     if hasattr(ex, "has_position_with_ref") and ex.has_position_with_ref(ref_key):
         log.warning("skip %s ref=%s — broker already has an open position for this setup ref! Duplicate blocked.",
                     symbol, ref_key)
         return False, active_open_count, at_risk_count
+
 
     # Remote GHA Stale Signal Guard: Reject setups older than MAX_SIGNAL_AGE_MIN after CANDLE CLOSE
     if not is_local_scan and signal_ts:
