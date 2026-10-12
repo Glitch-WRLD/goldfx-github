@@ -6,6 +6,13 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
+try:
+    import ssl
+    import certifi
+    ssl._create_default_https_context = lambda: ssl.create_default_context(cafile=certifi.where())
+except Exception:
+    pass
+
 # ---- TradingView symbols & timeframes ----
 SYMBOLS = {
     "XAUUSD": "OANDA:XAUUSD",
