@@ -128,6 +128,8 @@ AGENT_STATE_URL = os.getenv(
     "AGENT_STATE_URL",
     "https://raw.githubusercontent.com/Glitch-WRLD/goldfx-github/main/gha_state/state.json",
 )
+REMOTE_GHA_EXECUTION_ENABLED = os.getenv("REMOTE_GHA_EXECUTION_ENABLED", "0") == "1" # 0 = Native MT5 is sole execution engine
+
 
 # ---- Portfolio Exposure & Risk Budgeting ----
 MAX_CONCURRENT_TRADES   = int(os.getenv("MAX_CONCURRENT_TRADES", "20"))         # max total open trades across all pairs & indices

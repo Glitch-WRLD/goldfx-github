@@ -2849,17 +2849,18 @@ def tick() -> bool:
     except Exception as lse:
         log.error("scan_local_mt5_setups error: %s", lse, exc_info=True)
 
-    # 1. Execute remote setups from state.json (with staleness and slippage guards)
-    for entry in reversed(history):
-        fired, active_open_count, at_risk_count = _execute_setup_entry(
-            entry, ledger, ex, rm,
-            active_open_count, at_risk_count,
-            open_positions, at_risk_positions,
-            is_local_scan=False,
-            outcomes=outcomes
-        )
-        if fired:
-            fired_any = True
+    # 1. Execute remote setups from state.json (Fallback only; disabled by default on 24/7 Cloud VPS)
+    if getattr(config, "REMOTE_GHA_EXECUTION_ENABLED", False):
+        for entry in reversed(history):
+            fired, active_open_count, at_risk_count = _execute_setup_entry(
+                entry, ledger, ex, rm,
+                active_open_count, at_risk_count,
+                open_positions, at_risk_positions,
+                is_local_scan=False,
+                outcomes=outcomes
+            )
+            if fired:
+                fired_any = True
 
 
     # 2. Process pending retracements (Option 1: M5 Swing Sniper for Gold)
