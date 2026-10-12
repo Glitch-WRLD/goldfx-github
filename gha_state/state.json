@@ -279,6 +279,7 @@
   "USDJPY:2026-10-09T07:40:00+00:00",
   "USDJPY:2026-10-12T06:00:00+00:00",
   "USDJPY:2026-10-12T09:00:00+00:00",
+  "USDJPY:2026-10-12T12:00:00+00:00",
   "XAUUSD:2026-09-14T01:00:00+00:00",
   "XAUUSD:2026-09-14T02:30:00+00:00",
   "XAUUSD:2026-09-14T03:30:00+00:00",
@@ -374,6 +375,20 @@
   "XAUUSD:2026-10-12T07:35:00+00:00"
  ],
  "history": [
+  {
+   "dir": "LONG",
+   "entry": 158.6,
+   "profile": "balanced",
+   "ref": 337,
+   "rr": 1.13,
+   "sl": 158.4409253933234,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "USDJPY",
+   "tf": "H1",
+   "tp": 158.7793522246736,
+   "ts": "2026-10-12T12:00:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 0.55978,
@@ -7208,6 +7223,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 336,
+ "ref_seq": 337,
  "zones": []
 }
