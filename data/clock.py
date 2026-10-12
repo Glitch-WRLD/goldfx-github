@@ -115,6 +115,9 @@ def utc_now() -> dt.datetime:
     return dt.datetime.fromtimestamp(utc_ts(), dt.timezone.utc)
 
 
+utcnow = utc_now
+
+
 def broker_offset_sec(now: dt.datetime | None = None) -> int:
     """Broker server time minus UTC, in seconds.
 
