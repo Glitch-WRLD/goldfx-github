@@ -1698,40 +1698,61 @@ def process_pending_turtle_soup(ledger) -> int:
             still_pending[ref_key] = item
             continue
 
-        # 6. Rejection Confirmation: M5 candle close inside SL or sweep wick ratio >= 50%
+        # 6. Rejection Confirmation: Requires a COMPLETED M5 bar closing inside SL or with >=50% sweep wick
         confirmed = False
         min_wick_ratio = getattr(config, "TURTLE_SOUP_MIN_WICK_RATIO", 0.50)
-        if post_m5 is not None and len(post_m5) > 0:
+        if post_m5 is not None and len(post_m5) >= 2:
             try:
-                if direction == 1:
-                    sw_idx = post_m5["low"].idxmin()
-                    sw_bar = post_m5.loc[sw_idx]
-                    sw_rng = float(sw_bar["high"]) - float(sw_bar["low"])
-                    sw_wick = min(float(sw_bar["open"]), float(sw_bar["close"])) - float(sw_bar["low"])
-                    wick_ratio = sw_wick / sw_rng if sw_rng > 0 else 0.0
-                    body_inside = float(sw_bar["close"]) >= orig_sl
-                    last_closed = post_m5.iloc[-2] if len(post_m5) >= 2 else post_m5.iloc[-1]
-                    m5_close_inside = float(last_closed["close"]) >= orig_sl
-                else:
-                    sw_idx = post_m5["high"].idxmax()
-                    sw_bar = post_m5.loc[sw_idx]
-                    sw_rng = float(sw_bar["high"]) - float(sw_bar["low"])
-                    sw_wick = float(sw_bar["high"]) - max(float(sw_bar["open"]), float(sw_bar["close"]))
-                    wick_ratio = sw_wick / sw_rng if sw_rng > 0 else 0.0
-                    body_inside = float(sw_bar["close"]) <= orig_sl
-                    last_closed = post_m5.iloc[-2] if len(post_m5) >= 2 else post_m5.iloc[-1]
-                    m5_close_inside = float(last_closed["close"]) <= orig_sl
+                # Exclude live forming bar (iloc[-1]) and look at closed bars
+                closed_post_bars = post_m5.iloc[:-1]
+                # Filter for closed bars whose close time is at or after exit_ts
+                closed_after_exit = [
+                    bar for ts_idx, bar in closed_post_bars.iterrows()
+                    if (ts_idx + pd.Timedelta(minutes=5)) >= exit_ts
+                ]
+                if not closed_after_exit:
+                    log.info("TURTLE_SOUP_AWAITING_BAR_CLOSE: ref=%s %s waiting for M5 candle close after SL hit",
+                             ref_key, symbol)
+                    still_pending[ref_key] = item
+                    continue
 
-                if wick_ratio >= min_wick_ratio or body_inside or m5_close_inside:
-                    confirmed = True
-                else:
-                    log.info("TURTLE_SOUP_AWAITING_CONFIRMATION: ref=%s %s reclaimed orig_sl (wick=%.2f body=%s m5_close=%s)",
-                             ref_key, symbol, wick_ratio, body_inside, m5_close_inside)
+                for cl_bar in closed_after_exit:
+                    c_high = float(cl_bar["high"])
+                    c_low = float(cl_bar["low"])
+                    c_open = float(cl_bar["open"])
+                    c_close = float(cl_bar["close"])
+                    c_rng = c_high - c_low
+
+                    if direction == 1:
+                        # Long re-entry: candle closed back inside orig_sl OR long lower rejection wick >= 50%
+                        c_wick = min(c_open, c_close) - c_low
+                        wick_ratio = c_wick / c_rng if c_rng > 0 else 0.0
+                        if c_close >= orig_sl or (wick_ratio >= min_wick_ratio and c_close > c_low):
+                            confirmed = True
+                            break
+                    else:
+                        # Short re-entry: candle closed back inside orig_sl OR long upper rejection wick >= 50%
+                        c_wick = c_high - max(c_open, c_close)
+                        wick_ratio = c_wick / c_rng if c_rng > 0 else 0.0
+                        if c_close <= orig_sl or (wick_ratio >= min_wick_ratio and c_close < c_high):
+                            confirmed = True
+                            break
+
+                if not confirmed:
+                    log.info("TURTLE_SOUP_AWAITING_CONFIRMATION: ref=%s %s closed M5 bar has not confirmed rejection inside orig_sl",
+                             ref_key, symbol)
+                    still_pending[ref_key] = item
+                    continue
             except Exception as e_cf:
                 log.warning("Candle confirmation calculation error ref=%s: %s", ref_key, e_cf)
-                confirmed = True  # Fallback to trigger on error
+                still_pending[ref_key] = item
+                continue
         else:
-            confirmed = True  # Fallback if candle data unavailable
+            # Need at least 1 completed closed bar after exit_ts
+            log.info("TURTLE_SOUP_AWAITING_DATA: ref=%s %s awaiting M5 candle history", ref_key, symbol)
+            still_pending[ref_key] = item
+            continue
+
 
         if not confirmed:
             still_pending[ref_key] = item
