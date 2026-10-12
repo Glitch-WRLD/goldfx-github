@@ -284,10 +284,10 @@ def format_outcome(h: dict, hit: str, when_ts, exit_price: float) -> str:
     ref_line = "" if ref is None else f"  \u00b7 setup #{ref:04d}"
     return (
         f"{emoji} {sym} \u2014 {res}{ref_line}"
-        f"\n{'\u2500' * 26}"
+        f"\n{'─' * 26}"
         f"\n{d} \u00b7 entry {e} \u00b7 exit {p}"
         f"\n{sign}{abs(rr):.2f}R  \u00b7 {str(when_ts)[:16]}"
-        f"\n{'\u2500' * 26}\n"
+        f"\n{'─' * 26}\n"
         f"\u26A0\ufe0f Not financial advice."
     )
 

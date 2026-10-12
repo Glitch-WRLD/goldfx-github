@@ -284,12 +284,12 @@ def _format_fill_message(fill: Fill, entry: dict) -> str:
         ltf_line += f" · [{entry.get('entry_tf', 'M15')} Confirmed]"
     return (
         f"{emoji} {fill.symbol} \u2014 AUTO-FILLED {d}{ref_line}"
-        f"\n{'\u2500' * 26}"
+        f"\n{'─' * 26}"
         f"\n{d} \u00b7 fill {fill.fill_price:.5f} \u00b7 {fill.lots:.2f} lots"
         f"\nSL {entry.get('sl', 0):.5f} \u00b7 TP {entry.get('tp', 0):.5f} "
         f"\u00b7 RR 1:{entry.get('rr', 0):.2f}{ltf_line}"
         f"\nBroker: {fill.broker} \u00b7 {fill.ts}"
-        f"\n{'\u2500' * 26}"
+        f"\n{'─' * 26}"
         f"\n\u26A0\ufe0f Auto-traded by GoldFX agent."
     )
 
@@ -485,7 +485,7 @@ def handle_prerollover_guards(ledger, ex):
                                           classification="preroll_profit_lock")
                     msg = (
                         f"\U0001F7E2 {symbol} \u2014 PRE-ROLLOVER PROFIT LOCKED"
-                        f"\n{'\u2500' * 26}"
+                        f"\n{'─' * 26}"
                         f"\nClosed setup #{ref_key} ahead of daily rollover."
                         f"\nProfit banked & 85-pip spread spike avoided."
                     )
@@ -530,7 +530,7 @@ def handle_prerollover_guards(ledger, ex):
                                       exit_price=cur_p, pnl_usd=0.0, classification="preroll_margin_derisk")
                 msg = (
                     f"\U0001F6E1\uFE0F {symbol} \u2014 PRE-ROLLOVER MARGIN SHIELD ACTIVATED"
-                    f"\n{'\u2500' * 26}"
+                    f"\n{'─' * 26}"
                     f"\nDe-risked position #{ref_key} ({pos.get('lots', 0.01):.2f} lots)."
                     f"\nAccount protected from rollover spread blowout."
                 )
@@ -1049,12 +1049,12 @@ def manage_open_positions(ledger) -> int:
                             actions += 1
                             msg = (
                                 f"\U0001F6E1\uFE0F {symbol} \u2014 SMART REVERSAL PROFIT BANKED"
-                                f"\n{'\u2500' * 26}"
+                                f"\n{'─' * 26}"
                                 f"\nSetup #{ref} \u00b7 Opposing {tf_rev} reversal structure detected!"
                                 f"\nEarly Exit at {cur:.2f} (Banked +{mfe_r:.2f}R \u00b7 ~${realized_pnl:.2f})"
                                 f"\nAvoided potential Gold liquidity giveback to SL."
                                 f"\nBroker: {pos.get('broker', 'mt5')}"
-                                f"\n{'\u2500' * 26}"
+                                f"\n{'─' * 26}"
                                 f"\n\U0001F3AF Auto-protected by GoldFX smart agent."
                             )
                             if CHAT_ID:
@@ -1123,12 +1123,12 @@ def manage_open_positions(ledger) -> int:
             best_mfe = max(mfe_r, peak_mfe)
             msg = (
                 f"\U0001F3AF {symbol} \u2014 SL TRAILED TO LOCK PROFIT (STAGE 3)"
-                f"\n{'\u2500' * 26}"
+                f"\n{'─' * 26}"
                 f"\nSetup #{ref} \u00b7 Target progress: {best_pct:.0f}% (+{best_mfe:.2f}R)"
                 f"\nStop-loss locked at {trail_stage3_sl:.5f} ({s3_label})"
                 f"\nGuaranteed Profit: ~${s3_locked_usd:.2f} USD"
                 f"\nBroker: {pos.get('broker', 'mt5')}"
-                f"\n{'\u2500' * 26}"
+                f"\n{'─' * 26}"
                 f"\n\U0001F3C6 Auto-managed by GoldFX agent."
             )
             if CHAT_ID:
@@ -1151,12 +1151,12 @@ def manage_open_positions(ledger) -> int:
             best_mfe = max(mfe_r, peak_mfe)
             msg = (
                 f"\U0001F6E1\uFE0F {symbol} \u2014 SL TRAILED TO LOCK PROFIT (STAGE 2)"
-                f"\n{'\u2500' * 26}"
+                f"\n{'─' * 26}"
                 f"\nSetup #{ref} \u00b7 Target progress: {best_pct:.0f}% (+{best_mfe:.2f}R)"
                 f"\nStop-loss locked at {trail_stage2_sl:.5f} ({s2_label})"
                 f"\nGuaranteed Profit: ~${s2_locked_usd:.2f} USD"
                 f"\nBroker: {pos.get('broker', 'mt5')}"
-                f"\n{'\u2500' * 26}"
+                f"\n{'─' * 26}"
                 f"\n\U0001F3C6 Auto-managed by GoldFX agent."
             )
             if CHAT_ID:
@@ -1196,12 +1196,12 @@ def manage_open_positions(ledger) -> int:
                 best_pct = max(pct_tp, peak_pct_tp)
                 msg = (
                     f"\U0001F6E1\uFE0F {symbol} \u2014 SL MOVED TO BREAKEVEN (+1 PIP BUFFER)"
-                    f"\n{'\u2500' * 26}"
+                    f"\n{'─' * 26}"
                     f"\nSetup #{ref} \u00b7 Target progress: {best_pct:.0f}% (+{best_mfe:.2f}R)"
                     f"\nStop-loss adjusted to {be_sl:.5f} (Entry: {fill_price:.5f})"
                     f"\nRisk-Free: spread & broker costs protected!"
                     f"\nBroker: {pos.get('broker', 'mt5')}"
-                    f"\n{'\u2500' * 26}"
+                    f"\n{'─' * 26}"
                     f"\n\u26A0\ufe0f Auto-managed by GoldFX agent."
                 )
                 if CHAT_ID:
@@ -1390,10 +1390,10 @@ def process_pending_retracements(ledger) -> int:
                                   pnl_usd=0.0, classification="retrace_avoided_sl")
             msg = (
                 f"\U0001F6E1\uFE0F {symbol} \u2014 SETUP #{ref_key} SL BREACH AVOIDED"
-                f"\n{'\u2500' * 26}"
+                f"\n{'─' * 26}"
                 f"\nMarket crashed through original SL without confirmation."
                 f"\nAvoided -$25+ loss! Capital preserved: $0.00 loss."
-                f"\n{'\u2500' * 26}"
+                f"\n{'─' * 26}"
                 f"\n\u26A0\ufe0f Auto-protected by GoldFX agent."
             )
             if CHAT_ID:

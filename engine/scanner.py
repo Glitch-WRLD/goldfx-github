@@ -883,14 +883,14 @@ def format_message(sig: ScanSignal, ref: int | None = None) -> str:
         + ltf_tag
         + f"\n\U0001F50E Concept: {sig.strategy_badge}"
         + f"\nConfidence: {sig.confidence}% {sig.confidence_label}  [{conf_bar}]\n"
-        f"{'\u2500' * 26}"
+        f"{'─' * 26}"
     )
     dxy_tag = f" · 💵 DXY {sig.dxy_trend_label} Flow" if getattr(sig, "dxy_trend_label", "") else ""
     body = (
         f"\n\U0001F4CC Entry zone   {e}  @ market open"
         f"\n\U0001F6D1 Stop-loss    {sl}   (risk {sig.risk_pct:.1f}%)"
         f"\n\U0001F3AF Take-profit  {tp}   (R:R 1 : {sig.rr:.2f})\n"
-        f"{'\u2500' * 26}\n"
+        f"{'─' * 26}\n"
         f"📊 {sig.reason}{dxy_tag} · {sig.entry_tf} setup, {sig.bias_htf} bias\n"
         f"🕐 Candle Open: {captured} (Accra / GMT)\n"
     )
@@ -911,11 +911,11 @@ def format_zone_alert(za: ZoneAlert) -> str:
     bias = "BULLISH" if za.bias == 1 else "BEARISH"
     return (
         f"\u26A0\ufe0f {sym} \u2014 FVG ZONE FORMED (watch for retest)\n"
-        f"{'\u2500' * 26}\n"
+        f"{'─' * 26}\n"
         f"\U0001F4CA New imbalance on {za.bias_htf} bias \u00b7 {bias}\n"
         f"\U0001F3AF Zone  {bot} \u2013 {top}\n"
         f"\U0001F553 Price may retest this zone next bars.\n"
         f"Full {sym} setup posts automatically when the retest confirms.\n"
-        f"{'\u2500' * 26}\n"
+        f"{'─' * 26}\n"
         f"\u26A0\ufe0f Heads-up only \u2014 not a signal. Confirm quotes with your broker."
     )
