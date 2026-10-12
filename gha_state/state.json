@@ -257,6 +257,7 @@
   "USDCHF:2026-10-07T04:00:00+00:00",
   "USDCHF:2026-10-09T03:00:00+00:00",
   "USDCHF:2026-10-09T18:00:00+00:00",
+  "USDCHF:2026-10-12T09:00:00+00:00",
   "USDJPY:2026-10-02T16:00:00+00:00",
   "USDJPY:2026-10-05T08:25:00+00:00",
   "USDJPY:2026-10-05T08:30:00+00:00",
@@ -276,6 +277,7 @@
   "USDJPY:2026-10-09T07:35:00+00:00",
   "USDJPY:2026-10-09T07:40:00+00:00",
   "USDJPY:2026-10-12T06:00:00+00:00",
+  "USDJPY:2026-10-12T09:00:00+00:00",
   "XAUUSD:2026-09-14T01:00:00+00:00",
   "XAUUSD:2026-09-14T02:30:00+00:00",
   "XAUUSD:2026-09-14T03:30:00+00:00",
@@ -371,6 +373,34 @@
   "XAUUSD:2026-10-12T07:35:00+00:00"
  ],
  "history": [
+  {
+   "dir": "LONG",
+   "entry": 0.83238,
+   "profile": "balanced",
+   "ref": 335,
+   "rr": 1.47,
+   "sl": 0.8305724291843349,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "USDCHF",
+   "tf": "H1",
+   "tp": 0.8350392995709657,
+   "ts": "2026-10-12T09:00:00+00:00"
+  },
+  {
+   "dir": "LONG",
+   "entry": 158.5,
+   "profile": "balanced",
+   "ref": 334,
+   "rr": 2.59,
+   "sl": 158.34837142889367,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "USDJPY",
+   "tf": "H1",
+   "tp": 158.89227999954883,
+   "ts": "2026-10-12T09:00:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 30875.7,
@@ -7156,6 +7186,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 333,
+ "ref_seq": 335,
  "zones": []
 }
