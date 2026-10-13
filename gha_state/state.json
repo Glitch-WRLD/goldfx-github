@@ -89,6 +89,7 @@
   "GBPAUD:2026-10-05T04:00:00+00:00",
   "GBPAUD:2026-10-07T02:00:00+00:00",
   "GBPAUD:2026-10-07T10:00:00+00:00",
+  "GBPAUD:2026-10-13T12:00:00+00:00",
   "GBPUSD:2026-09-14T23:00:00+00:00",
   "GBPUSD:2026-09-15T03:00:00+00:00",
   "GBPUSD:2026-09-15T08:00:00+00:00",
@@ -402,6 +403,20 @@
   "XAUUSD:2026-10-13T08:15:00+00:00"
  ],
  "history": [
+  {
+   "dir": "LONG",
+   "entry": 1.89841,
+   "profile": "balanced",
+   "ref": 365,
+   "rr": 1.57,
+   "sl": 1.8974445447741897,
+   "strategy_badge": "\ud83c\udfdb\ufe0f Institutional SMC Sweep",
+   "strategy_type": "smc_sweep",
+   "symbol": "GBPAUD",
+   "tf": "H1",
+   "tp": 1.8999296373161343,
+   "ts": "2026-10-13T12:00:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 7802.7,
@@ -7838,6 +7853,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 364,
+ "ref_seq": 365,
  "zones": []
 }
