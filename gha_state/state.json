@@ -391,9 +391,24 @@
   "XAUUSD:2026-10-12T07:35:00+00:00",
   "XAUUSD:2026-10-13T01:00:00+00:00",
   "XAUUSD:2026-10-13T03:30:00+00:00",
-  "XAUUSD:2026-10-13T04:30:00+00:00"
+  "XAUUSD:2026-10-13T04:30:00+00:00",
+  "XAUUSD:2026-10-13T07:15:00+00:00"
  ],
  "history": [
+  {
+   "dir": "LONG",
+   "entry": 4191.405,
+   "profile": "balanced",
+   "ref": 357,
+   "rr": 2.0,
+   "sl": 4188.134999999999,
+   "strategy_badge": "\ud83c\udfaf ISDE Session Delivery",
+   "strategy_type": "isde_session",
+   "symbol": "XAUUSD",
+   "tf": "M5",
+   "tp": 4197.945000000001,
+   "ts": "2026-10-13T07:15:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 30441.9,
@@ -7676,6 +7691,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 356,
+ "ref_seq": 357,
  "zones": []
 }
