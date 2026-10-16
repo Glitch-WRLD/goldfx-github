@@ -307,6 +307,7 @@
   "USDCAD:2026-10-13T16:00:00+00:00",
   "USDCAD:2026-10-15T07:00:00+00:00",
   "USDCAD:2026-10-16T01:00:00+00:00",
+  "USDCAD:2026-10-16T08:00:00+00:00",
   "USDCHF:2026-09-28T04:00:00+00:00",
   "USDCHF:2026-09-28T07:00:00+00:00",
   "USDCHF:2026-09-29T03:00:00+00:00",
@@ -468,9 +469,38 @@
   "XAUUSD:2026-10-16T07:05:00+00:00",
   "XAUUSD:2026-10-16T07:10:00+00:00",
   "XAUUSD:2026-10-16T08:25:00+00:00",
-  "XAUUSD:2026-10-16T08:45:00+00:00"
+  "XAUUSD:2026-10-16T08:45:00+00:00",
+  "XAUUSD:2026-10-16T08:55:00+00:00"
  ],
  "history": [
+  {
+   "dir": "LONG",
+   "entry": 4189.005,
+   "profile": "balanced",
+   "ref": 435,
+   "rr": 2.0,
+   "sl": 4184.1849999999995,
+   "strategy_badge": "\ud83c\udfaf ISDE Session Delivery",
+   "strategy_type": "isde_session",
+   "symbol": "XAUUSD",
+   "tf": "M5",
+   "tp": 4198.645000000001,
+   "ts": "2026-10-16T08:55:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 1.4165,
+   "profile": "balanced",
+   "ref": 434,
+   "rr": 1.84,
+   "sl": 1.4179144487539213,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "USDCAD",
+   "tf": "H1",
+   "tp": 1.4138957717445102,
+   "ts": "2026-10-16T08:00:00+00:00"
+  },
   {
    "dir": "LONG",
    "entry": 1.91374,
@@ -9314,6 +9344,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 433,
+ "ref_seq": 435,
  "zones": []
 }
