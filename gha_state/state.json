@@ -296,6 +296,7 @@
   "USDCAD:2026-10-12T17:00:00+00:00",
   "USDCAD:2026-10-13T16:00:00+00:00",
   "USDCAD:2026-10-15T07:00:00+00:00",
+  "USDCAD:2026-10-16T01:00:00+00:00",
   "USDCHF:2026-09-28T04:00:00+00:00",
   "USDCHF:2026-09-28T07:00:00+00:00",
   "USDCHF:2026-09-29T03:00:00+00:00",
@@ -454,6 +455,20 @@
   "XAUUSD:2026-10-16T00:30:00+00:00"
  ],
  "history": [
+  {
+   "dir": "SHORT",
+   "entry": 1.41976,
+   "profile": "balanced",
+   "ref": 417,
+   "rr": 4.19,
+   "sl": 1.420052612001281,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "USDCAD",
+   "tf": "H1",
+   "tp": 1.4185343431982063,
+   "ts": "2026-10-16T01:00:00+00:00"
+  },
   {
    "dir": "LONG",
    "entry": 4156.445,
@@ -9010,6 +9025,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 416,
+ "ref_seq": 417,
  "zones": []
 }
