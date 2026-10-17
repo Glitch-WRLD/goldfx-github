@@ -59,12 +59,14 @@ KELLY_FRACTION          = float(os.getenv("KELLY_FRACTION", "0.25"))   # scaled 
 # All trades during the week risk a fixed dollar amount based on the week-start settled balance.
 STEP_COMPOUNDING_ENABLED = os.getenv("STEP_COMPOUNDING_ENABLED", "1") == "1" # 1 = Enable weekly step-compounding
 STEP_COMPOUNDING_MODE    = os.getenv("STEP_COMPOUNDING_MODE", "WEEKLY")      # "WEEKLY" anchor
-STEP_DRAWDOWN_RESET_PCT  = float(os.getenv("STEP_DRAWDOWN_RESET_PCT", "25.0"))# Emergency step-down if live equity drops > 25%
+STEP_DRAWDOWN_RESET_ENABLED = os.getenv("STEP_DRAWDOWN_RESET_ENABLED", "0") == "1" # 0 = Pure fixed weekly dollar risk (no valley-sizing)
+STEP_DRAWDOWN_RESET_PCT  = float(os.getenv("STEP_DRAWDOWN_RESET_PCT", "50.0"))# Emergency step-down if live equity drops > 50%
+MIN_RISK_PER_TRADE       = float(os.getenv("MIN_RISK_PER_TRADE", "3.0"))      # Minimum target risk % bracket (3.0% - 4.0%)
 
 # ---- Gold Retracement Sniper (M5 Swing Anchor for small accounts) ----
 RETRACE_ENABLED = os.getenv("RETRACE_ENABLED", "1") == "1"
 RETRACE_MIN_PULLBACK_PCT = float(os.getenv("RETRACE_MIN_PULLBACK_PCT", "0.25"))  # must retrace at least 25% of stop dist
-RETRACE_MAX_RISK_USD = float(os.getenv("RETRACE_MAX_RISK_USD", "7.50"))          # max allowed dollar risk on sniper entry
+RETRACE_MAX_RISK_USD = float(os.getenv("RETRACE_MAX_RISK_USD", "25.00"))          # max allowed dollar risk on sniper entry
 RETRACE_BUFFER_USD = float(os.getenv("RETRACE_BUFFER_USD", "0.50"))              # buffer below swing low / above swing high
 RETRACE_MAX_WAIT_HOURS = float(os.getenv("RETRACE_MAX_WAIT_HOURS", "6.0"))       # expire if no entry after 6h
 RETRACE_INVAL_TP_PCT = float(os.getenv("RETRACE_INVAL_TP_PCT", "0.90"))          # cancel if 90% of TP reached before pullback
@@ -86,6 +88,11 @@ MAX_ADVERSE_DRIFT_PCT = float(os.getenv("MAX_ADVERSE_DRIFT_PCT", "0.50"))# Allow
 ROLLOVER_START_UTC = os.getenv("ROLLOVER_START_UTC", "23:45")             # Pre-rollover start (when spreads widen)
 ROLLOVER_END_UTC = os.getenv("ROLLOVER_END_UTC", "00:25")                 # Post-rollover end (when liquidity normalizes)
 CLOSE_IN_PROFIT_BEFORE_ROLLOVER = os.getenv("CLOSE_IN_PROFIT_BEFORE_ROLLOVER", "1") == "1" # Lock profit before spread blowout
+# ---- Friday Weekend De-Risking & Market Close Protection ----
+FRIDAY_CLOSE_ALL_BEFORE_WEEKEND = os.getenv("FRIDAY_CLOSE_ALL_BEFORE_WEEKEND", "1") == "1" # 1 = Force-close ALL positions before weekend
+FRIDAY_WEEKEND_CLOSE_START_UTC  = os.getenv("FRIDAY_WEEKEND_CLOSE_START_UTC", "20:30")      # 20:30 UTC Friday
+FRIDAY_WEEKEND_CLOSE_END_UTC    = os.getenv("FRIDAY_WEEKEND_CLOSE_END_UTC", "21:00")        # 21:00 UTC Friday
+
 # ---- Scanner ----
 SCAN_INTERVAL_SEC = int(os.getenv("SCAN_INTERVAL_SEC", "150"))  # ~ every 2.5 min
 MIN_TRADES_BEFORE_RESEND_SAME_SETUP = 2
@@ -123,7 +130,8 @@ MT5_MAGIC      = int(os.getenv("MT5_MAGIC", "7710"))        # EA identifier
 # OANDA broker (used only when AUTO_TRADE_ENV in demo|live)
 OANDA_TOKEN    = os.getenv("OANDA_TOKEN", "")
 OANDA_ACCOUNT_ID = os.getenv("OANDA_ACCOUNT_ID", "")
-AGENT_POLL_SEC = int(os.getenv("AGENT_POLL_SEC", "20"))     # state.json poll cadence
+AGENT_POLL_SEC = float(os.getenv("AGENT_POLL_SEC", "20"))     # state.json fallback cadence
+FAST_POLL_SEC  = float(os.getenv("FAST_POLL_SEC", "2.5"))       # intra-bar fast poll cadence (s)
 AGENT_STATE_URL = os.getenv(
     "AGENT_STATE_URL",
     "https://raw.githubusercontent.com/Glitch-WRLD/goldfx-github/main/gha_state/state.json",
@@ -245,7 +253,7 @@ TURTLE_SOUP_EXEMPT_SYMBOLS  = set(os.getenv("TURTLE_SOUP_EXEMPT_SYMBOLS", "NASDA
 
 # Physical broker & spread buffer minimum stop floors per symbol (prevents micro-stop artifacts)
 TURTLE_SOUP_MIN_STOP_FLOOR  = {
-    "XAUUSD": float(os.getenv("TURTLE_SOUP_MIN_STOP_GOLD", "1.50")),    # $1.50 Gold floor (150 pts)
+    "XAUUSD": float(os.getenv("TURTLE_SOUP_MIN_STOP_GOLD", "2.50")),    # $2.50 Gold floor (250 pts)
     "EURUSD": float(os.getenv("TURTLE_SOUP_MIN_STOP_EURUSD", "0.00050")), # 5.0 pips
     "GBPUSD": float(os.getenv("TURTLE_SOUP_MIN_STOP_GBPUSD", "0.00050")), # 5.0 pips
     "USDJPY": float(os.getenv("TURTLE_SOUP_MIN_STOP_USDJPY", "0.050")),   # 5.0 pips

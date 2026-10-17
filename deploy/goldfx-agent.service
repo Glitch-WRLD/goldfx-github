@@ -1,0 +1,16 @@
+[Unit]
+Description=GoldFX auto-trading agent (reads state.json, executes OANDA)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__PROJDIR__
+ExecStart=__VENVPY__ scripts/run_agent.py
+Restart=always
+RestartSec=10
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

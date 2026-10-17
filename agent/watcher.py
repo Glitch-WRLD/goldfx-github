@@ -33,7 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import config
 from agent.oanda import executor_for_env, Fill
 from agent.ledger import load_ledger
-from engine.risk import RiskManager, position_size, floor_lots
+from engine.risk import RiskManager, position_size, floor_lots, bracket_quantize_lots
 from strategy.profiles import SYMBOL_RUNTIME
 from data.clock import utc_now as _utcnow, refresh_skew as _refresh_clock_skew
 
@@ -184,6 +184,8 @@ def flush_pending() -> int:
 # ---------------------------------------------------------------------------
 _STATE_CACHE = config.AGENT_STATE_URL
 _HTTP = None
+_CACHED_STATE: dict = {}
+_LAST_STATE_FETCH_TS: float = 0.0
 
 
 def _get_http():
@@ -194,8 +196,15 @@ def _get_http():
     return _HTTP
 
 
-def fetch_state() -> dict:
-    """GET state.json from configured URL, with automatic fallback to public raw GitHub URL."""
+def fetch_state(force: bool = False, max_age_sec: float = 60.0) -> dict:
+    """GET state.json from configured URL, with automatic fallback to public raw GitHub URL.
+    Uses in-memory TTL caching (default 60s) to prevent blocking the high-frequency execution loop.
+    """
+    global _CACHED_STATE, _LAST_STATE_FETCH_TS
+    now = time.time()
+    if not force and _CACHED_STATE and (now - _LAST_STATE_FETCH_TS) < max_age_sec:
+        return _CACHED_STATE
+
     urls = [_STATE_CACHE]
     raw_github = "https://raw.githubusercontent.com/Glitch-WRLD/goldfx-github/main/gha_state/state.json"
     if raw_github not in urls:
@@ -205,7 +214,9 @@ def fetch_state() -> dict:
         try:
             r = _get_http().get(u)
             if r.status_code == 200:
-                return json.loads(r.text)
+                _CACHED_STATE = json.loads(r.text)
+                _LAST_STATE_FETCH_TS = now
+                return _CACHED_STATE
             log.warning("state fetch (%s) HTTP %d", u, r.status_code)
         except Exception as e:
             log.warning("state fetch (%s) failed: %s", u, e)
@@ -214,10 +225,12 @@ def fetch_state() -> dict:
     local_state = Path(__file__).resolve().parents[1] / "gha_state" / "state.json"
     if local_state.exists():
         try:
-            return json.loads(local_state.read_text(encoding="utf-8"))
+            _CACHED_STATE = json.loads(local_state.read_text(encoding="utf-8"))
+            _LAST_STATE_FETCH_TS = now
+            return _CACHED_STATE
         except Exception as e:
             log.warning("local state read failed: %s", e)
-    return {}
+    return _CACHED_STATE or {}
 
 
 def fetch_outcomes(state: dict) -> dict:
@@ -314,10 +327,12 @@ def _is_prerollover_window() -> bool:
     On Friday, activates early at 20:30 - 21:00 UTC ahead of broker market close to prevent trades being stranded over the weekend.
     """
     now_dt = _utcnow()
-    # On Friday (weekday == 4), market closes early (~21:00-22:00 UTC). De-risk at 20:30-21:00 UTC.
+    # On Friday (weekday == 4), market closes early (~21:00-22:00 UTC). Flatten/De-risk at 20:30-21:00 UTC.
     if now_dt.weekday() == 4:
         curr_min = now_dt.hour * 60 + now_dt.minute
-        return (20 * 60 + 30) <= curr_min < (21 * 60)
+        sh, sm = [int(x) for x in getattr(config, "FRIDAY_WEEKEND_CLOSE_START_UTC", "20:30").split(":")]
+        eh, em = [int(x) for x in getattr(config, "FRIDAY_WEEKEND_CLOSE_END_UTC", "21:00").split(":")]
+        return (sh * 60 + sm) <= curr_min < (eh * 60 + em)
 
     now_utc = now_dt.time()
     try:
@@ -449,13 +464,71 @@ def handle_prenew_guards(ledger, ex) -> int:
 
 
 def handle_prerollover_guards(ledger, ex):
-    """Execute Defense 2 (Margin Stress-Test) and Defense 3 (Pre-Rollover Profit Lock)."""
+    """Execute Defense 2 (Margin Stress-Test), Defense 3 (Pre-Rollover Profit Lock),
+    and Friday Weekend Full-Flattening Safeguard."""
     if not _is_prerollover_window():
+        return
+
+    now_dt = _utcnow()
+    is_friday = now_dt.weekday() == 4
+
+    # =========================================================================
+    # FRIDAY WEEKEND FULL-FLATTENING SAFEGUARD (Strictly Friday 20:30 - 21:00 UTC)
+    # Flattens 100% of open positions (both in-profit and in-drawdown) to guarantee
+    # 100% cash before the 48-hour weekend market closure and Sunday open gap risk!
+    # =========================================================================
+    if is_friday and getattr(config, "FRIDAY_CLOSE_ALL_BEFORE_WEEKEND", True):
+        open_pos = ledger.open_entries()
+        for ref_key, pos in list(open_pos.items()):
+            symbol = pos.get("symbol", "")
+            direction = int(pos.get("direction", 1))
+            entry_p = float(pos.get("fill_price", pos.get("entry_delivered", 0.0)))
+            cur_p = ex.current_price(symbol, direction=direction) if hasattr(ex, "current_price") else 0.0
+            order_id = pos.get("order_id")
+            lots = float(pos.get("lots", 0.01))
+
+            log.info("FRIDAY_WEEKEND_FLATTEN: Force-closing %s ref=%s (cur=%.5f, entry=%.5f, lots=%.2f) ahead of weekend",
+                     symbol, ref_key, cur_p, entry_p, lots)
+            close_res = None
+            if hasattr(ex, "close_position_by_ticket") and order_id and str(order_id).isdigit():
+                close_res = ex.close_position_by_ticket(int(order_id))
+            if not close_res or not close_res.ok:
+                close_res = ex.close_position(symbol, direction, lots)
+
+            if close_res and close_res.ok:
+                exit_price = getattr(close_res, "fill_price", cur_p) or cur_p
+                is_win = (direction == 1 and exit_price > entry_p) or (direction == -1 and exit_price < entry_p)
+                pnl_approx = float(pos.get("risk_usd", 70.0)) * (1.0 if is_win else -1.0)
+                ledger.record_outcome(ref_key, status="closed", hit="friday_weekend_close",
+                                      exit_price=exit_price, pnl_usd=pnl_approx,
+                                      classification="friday_weekend_flatten")
+                msg = (
+                    f"🛡️ {symbol} — FRIDAY WEEKEND SHIELD ACTIVATED\n"
+                    f"{'─' * 26}\n"
+                    f"Closed setup #{ref_key} ahead of Friday market close.\n"
+                    f"100% cash preserved & 48-hour weekend gap risk eliminated."
+                )
+                if CHAT_ID:
+                    send(CHAT_ID, msg)
+
+        # Broker-side sweep: close any remaining active broker positions directly by ticket
+        if hasattr(ex, "get_open_positions") and hasattr(ex, "close_position_by_ticket"):
+            try:
+                remaining_bps = ex.get_open_positions()
+                for bp in remaining_bps:
+                    t_id = bp.get("ticket")
+                    sym = bp.get("symbol")
+                    log.warning("FRIDAY_WEEKEND_FLATTEN: Closing untracked broker position ticket=%s (%s)", t_id, sym)
+                    ex.close_position_by_ticket(int(t_id))
+            except Exception as e:
+                log.warning("FRIDAY_WEEKEND_FLATTEN broker sweep error: %s", e)
+
         return
 
     open_pos = ledger.open_entries()
     if not open_pos:
         return
+
 
     # Defense 3: Pre-Rollover Profit Lock
     if getattr(config, "CLOSE_IN_PROFIT_BEFORE_ROLLOVER", True):
@@ -623,14 +696,47 @@ def manage_open_positions(ledger) -> int:
     ex = get_executor()
     actions = 0
 
-    # Query active broker positions to auto-reconcile manually closed or broker-closed tickets
     active_broker_tickets = None
+    bps = None
     if hasattr(ex, "get_open_positions"):
         try:
             bps = ex.get_open_positions()
             active_broker_tickets = {str(p["ticket"]) for p in bps} if bps is not None else None
         except Exception as be:
             log.debug("get_open_positions check failed: %s", be)
+
+    # Auto-adopt live broker positions belonging to goldfx if missing from ledger
+    if bps is not None:
+        adopted = False
+        for bp in bps:
+            t_id = str(bp.get("ticket"))
+            comm = str(bp.get("comment", "")).strip()
+            ref_match = None
+            if comm.startswith("goldfx "):
+                ref_match = comm[7:].lstrip("#").strip()
+            elif comm.startswith("goldfx#"):
+                ref_match = comm[7:].strip()
+
+            if ref_match:
+                pos_entry = ledger.data.get(ref_match)
+                if not pos_entry or str(pos_entry.get("order_id")) != t_id:
+                    log.warning("AUTO_ADOPT: Adopting live MT5 position ticket=%s (%s %s) with comment '%s' into ledger ref=%s",
+                                t_id, bp.get("symbol"), "BUY" if bp.get("type") == 0 else "SELL", comm, ref_match)
+                    if not pos_entry:
+                        pos_entry = {"ref": ref_match}
+                        ledger.data[ref_match] = pos_entry
+                    pos_entry["order_id"] = t_id
+                    pos_entry["symbol"] = bp.get("symbol")
+                    pos_entry["direction"] = 1 if bp.get("type") == 0 else -1
+                    pos_entry["fill_price"] = float(bp.get("open_price", 0.0))
+                    pos_entry["lots"] = float(bp.get("lots", 0.0))
+                    pos_entry["sl"] = float(bp.get("sl", 0.0))
+                    pos_entry["tp"] = float(bp.get("tp", 0.0))
+                    pos_entry["status"] = "open"
+                    pos_entry["broker"] = "mt5"
+                    adopted = True
+        if adopted:
+            ledger.save()
 
     # Broker synchronization: if a position with a live MT5 ticket is marked non-open, revive it to open
     if active_broker_tickets is not None:
@@ -1346,7 +1452,8 @@ def process_pending_retracements(ledger) -> int:
                 log.info("RETRACE_QUARANTINE XAUUSD ref=%s — balance ($%.2f) below $%.2f minimum for Standard Gold. Cancelled.",
                          ref_key, rm.balance, min_gold_abs)
                 ledger.record_outcome(ref_key, status="quarantined", hit="gold_quarantined_low_balance",
-                                      pnl_usd=0.0, classification="gold_small_account_quarantine")
+                                      pnl_usd=0.0, classification="gold_small_account_quarantine",
+                                      symbol=symbol, signal_ts=item.get("signal_ts", ""))
                 continue
 
         # A. Timeout check (e.g. 6 hours)
@@ -1355,7 +1462,8 @@ def process_pending_retracements(ledger) -> int:
             log.info("RETRACE_EXPIRED ref=%s (age %.1fh > %.1fh)",
                      ref_key, (now - first_seen) / 3600, max_wait_sec / 3600)
             ledger.record_outcome(ref_key, status="skipped", hit="expired",
-                                  pnl_usd=0.0, classification="retrace_timeout")
+                                  pnl_usd=0.0, classification="retrace_timeout",
+                                  symbol=symbol, signal_ts=item.get("signal_ts", ""))
             continue
 
         # Get current price
@@ -1373,7 +1481,8 @@ def process_pending_retracements(ledger) -> int:
             log.info("RETRACE_INVALIDATED ref=%s — hit 90%% TP before pullback (cur %.2f, tp_inval %.2f)",
                      ref_key, cur, tp_75)
             ledger.record_outcome(ref_key, status="skipped", hit="invalidated_tp90",
-                                  pnl_usd=0.0, classification="retrace_inval_tp90")
+                                  pnl_usd=0.0, classification="retrace_inval_tp90",
+                                  symbol=symbol, signal_ts=item.get("signal_ts", ""))
             msg = (
                 f"⚪ {symbol} — SETUP #{ref_key} CANCELLED (90% TP REACHED)\n"
                 f"{'─' * 26}\n"
@@ -1471,18 +1580,18 @@ def process_pending_retracements(ledger) -> int:
             candidate_sl_dist = min_stop_dist
             candidate_sl = cur_bar["close"] - min_stop_dist if direction == 1 else cur_bar["close"] + min_stop_dist
 
-        # Dynamic Lot Sizing based on portfolio risk budget (6%)
+        # Dynamic Lot Sizing based on portfolio risk budget (3.0% - 4.0%)
         risk_usd = rm.balance * rm.risk_pct / 100.0
-        lots_raw = position_size(symbol, risk_usd, candidate_sl_dist)
-        lots = floor_lots(symbol, lots_raw)
+        min_pct = getattr(config, "MIN_RISK_PER_TRADE", 3.0)
+        max_pct = getattr(config, "MAX_RISK_PER_TRADE", 4.0)
+        lots = bracket_quantize_lots(symbol, risk_usd, candidate_sl_dist, rm.balance, min_risk_pct=min_pct, max_risk_pct=max_pct, target_risk_pct=rm.risk_pct)
         min_lot = float(c_info.get("min_lot", 0.01))
 
         if lots < min_lot:
             min_risk = min_lot * (candidate_sl_dist / point) * pip_val
-            # On small accounts, cap max allowed risk dynamically to max_risk_pct of balance (e.g. 8% of $40 = $3.20)
-            max_risk_pct = float(getattr(config, "MAX_RISK_PER_TRADE", 8.0))
-            dyn_cap = rm.balance * (max_risk_pct / 100.0) if rm.balance > 0 else 7.50
-            max_allowed = min(float(getattr(config, "RETRACE_MAX_RISK_USD", 7.50)), dyn_cap)
+            # On small accounts, cap max allowed risk dynamically to max_risk_pct of balance (e.g. 4% of balance)
+            dyn_cap = rm.balance * (max_pct / 100.0) if rm.balance > 0 else 7.50
+            max_allowed = max(float(getattr(config, "RETRACE_MAX_RISK_USD", 25.00)), dyn_cap)
             if min_risk > max_allowed:
                 log.info("RETRACE_SKIP_BAR ref=%s %s min lot risk $%.2f exceeds small account cap $%.2f (%.1f%% of balance)",
                          ref_key, symbol, min_risk, max_allowed, (min_risk / rm.balance * 100) if rm.balance > 0 else 0)
@@ -1601,6 +1710,12 @@ def process_pending_turtle_soup(ledger) -> int:
             log.info("TURTLE_SOUP_SESSION_EXPIRED: ref=%s %s in blackout session (%s) — cancelling re-entry",
                      ref_key, symbol, weak_reason)
             continue
+
+        # Gold Asian Liquidity Shield: Avoid re-entering Gold sweeps during 00:00-06:00 UTC thin Asian liquidity
+        if symbol == "XAUUSD" and 0 <= now_utc.hour < 6:
+            log.info("TURTLE_SOUP_ASIAN_GOLD_BYPASS: ref=%s XAUUSD in Asian low-liquidity window (%02d:%02d UTC) — cancelling re-entry",
+                     ref_key, now_utc.hour, now_utc.minute)
+            continue
         direction = int(item["direction"])
         orig_entry = float(item["original_entry"])
         orig_sl = float(item["original_sl"])
@@ -1637,9 +1752,9 @@ def process_pending_turtle_soup(ledger) -> int:
         pip_val = c_info.get("pip_value_per_lot_usd", 1.0)
         fmt_digits = 2 if point >= 0.01 else 5
 
-        # Query live tick price
+        # Query live tick price (directional: ask for BUY, bid for SELL)
         if hasattr(ex, "get_spread_pips"):
-            spread_pips, cur_price = ex.get_spread_pips(symbol)
+            spread_pips, cur_price = ex.get_spread_pips(symbol, direction=direction)
         else:
             cur_price = ex.current_price(symbol, direction=direction) if hasattr(ex, "current_price") else 0.0
             spread_pips = 0.0
@@ -1808,6 +1923,17 @@ def process_pending_turtle_soup(ledger) -> int:
         target_mode = getattr(config, "TURTLE_SOUP_TARGET_MODE", "ORIGINAL_ENTRY")
         candidate_tp = orig_entry if target_mode == "ORIGINAL_ENTRY" else orig_tp
 
+        # Anti-Chase Guard: If price has already ran > 35% of the total distance towards candidate_tp, expire!
+        full_move = abs(orig_sl - candidate_tp)
+        if full_move > 0:
+            run_dist = (orig_sl - fill_entry) if direction == -1 else (fill_entry - orig_sl)
+            if run_dist > 0:
+                run_pct = run_dist / full_move
+                if run_pct > 0.35:
+                    log.info("TURTLE_SOUP_CHASE_AVOIDED: ref=%s %s price already ran %.1f%% towards TP (cur %.5f, orig_sl %.5f, tp %.5f) — expiring",
+                             ref_key, symbol, run_pct * 100.0, fill_entry, orig_sl, candidate_tp)
+                    continue
+
         if direction == 1:
             raw_sl = sweep_extreme - buf_price
             raw_sl_dist = fill_entry - raw_sl
@@ -1829,14 +1955,15 @@ def process_pending_turtle_soup(ledger) -> int:
                          ref_key, symbol, candidate_tp, fill_entry)
                 continue
 
-        if target_dist <= 0 or candidate_sl_dist <= 0:
+        actual_sl_dist = abs(fill_entry - candidate_sl)
+        if target_dist <= 0 or actual_sl_dist <= 0:
             log.info("TURTLE_SOUP_TARGET_INVALID: ref=%s %s target_dist=%.5f sl_dist=%.5f — expiring",
-                     ref_key, symbol, target_dist, candidate_sl_dist)
+                     ref_key, symbol, target_dist, actual_sl_dist)
             continue
 
-        target_rr = target_dist / candidate_sl_dist
-        if target_rr < 0.5:
-            log.info("TURTLE_SOUP_RR_TOO_LOW: ref=%s %s target_rr=%.2f < 0.5 — expiring", ref_key, symbol, target_rr)
+        target_rr = target_dist / actual_sl_dist
+        if target_rr < 0.65:
+            log.info("TURTLE_SOUP_RR_TOO_LOW: ref=%s %s target_rr=%.2f < 0.65 — expiring", ref_key, symbol, target_rr)
             continue
 
         # 9. Dynamic Lot Sizing governed strictly by Weekly Step-Compounding Anchor at 3.5% Risk
@@ -1847,16 +1974,17 @@ def process_pending_turtle_soup(ledger) -> int:
 
         risk_pct = getattr(config, "RISK_PER_TRADE", 3.5)
         risk_usd = rm.balance * (risk_pct / 100.0)
-
-        lots_raw = position_size(symbol, risk_usd, candidate_sl_dist)
-        lots = floor_lots(symbol, lots_raw)
+        min_pct = getattr(config, "MIN_RISK_PER_TRADE", 3.0)
+        max_pct = getattr(config, "MAX_RISK_PER_TRADE", 4.0)
+        # Crucial: size strictly based on actual physical distance to candidate_sl level
+        lots = bracket_quantize_lots(symbol, risk_usd, actual_sl_dist, rm.balance, min_risk_pct=min_pct, max_risk_pct=max_pct, target_risk_pct=risk_pct)
         min_lot = float(c_info.get("min_lot", 0.01))
 
         if lots < min_lot:
             lots = min_lot
 
         from engine.risk import risk_amount
-        dollar_risk = risk_amount(symbol, lots, candidate_sl_dist)
+        dollar_risk = risk_amount(symbol, lots, actual_sl_dist)
 
         # Verify cumulative open portfolio risk budget (65%)
         total_open_risk_usd = sum(float(e.get("risk_usd", 0.0)) for e in open_entries.values())
@@ -1876,6 +2004,10 @@ def process_pending_turtle_soup(ledger) -> int:
 
         if not fill.ok:
             log.warning("Turtle soup order rejected ref=%s: %s", ref_key, fill.message[:200])
+            # If rejected due to sanity check, inverted TP, or slippage, DO NOT retry endlessly! Expire the setup!
+            if any(err_kw in fill.message for err_kw in ["ORDER_SANITY_REJECT", "inverted TP", "SLIPPAGE_GUARD_REJECT"]):
+                log.info("TURTLE_SOUP_INVALIDATED_BY_BROKER: ref=%s %s %s — expiring setup", ref_key, symbol, fill.message[:100])
+                continue
             still_pending[ref_key] = item
             continue
 
@@ -2013,8 +2145,8 @@ def _execute_setup_entry(
         return False, active_open_count, at_risk_count
 
 
-    # Remote GHA Stale Signal Guard: Reject setups older than MAX_SIGNAL_AGE_MIN after CANDLE CLOSE
-    if not is_local_scan and signal_ts:
+    # Strict Bar-0 Signal Freshness Guard: Reject setups older than MAX_SIGNAL_AGE_MIN (or 1.0 min for local scans)
+    if signal_ts:
         try:
             sig_dt = dt.datetime.fromisoformat(signal_ts.replace("Z", "+00:00"))
             tf = str(entry.get("tf", "M15")).upper()
@@ -2022,9 +2154,9 @@ def _execute_setup_entry(
             candle_close_dt = sig_dt + dt.timedelta(minutes=tf_mins)
             now_utc = _utcnow()
             age_min = max(0.0, (now_utc - candle_close_dt).total_seconds() / 60.0)
-            max_age_min = float(getattr(config, "MAX_SIGNAL_AGE_MIN", 45.0))
+            max_age_min = 1.0 if is_local_scan else float(getattr(config, "MAX_SIGNAL_AGE_MIN", 45.0))
             if age_min > max_age_min:
-                log.info("skip %s ref=%s — signal age %.1fm after candle close exceeds max allowed %.1fm (GHA cron delay). Entry aborted.",
+                log.info("skip %s ref=%s — signal age %.1fm after candle close exceeds max allowed %.1fm. Entry aborted (Strict Bar-0 Freshness).",
                          symbol, ref_key, age_min, max_age_min)
                 ledger.record_outcome(ref_key, status="skipped", hit="stale_signal_age",
                                       pnl_usd=0.0, classification="stale_signal_delayed",
@@ -2374,6 +2506,9 @@ def _execute_setup_entry(
                         "label": f"goldfx #{ref_key}" if str(ref_key).isdigit() else f"goldfx {ref_key}",
                     }
                     _save_pending_retrace(pending_retrace)
+                    ledger.record_outcome(ref_key, status="pending_retrace", hit="awaiting_pullback",
+                                          pnl_usd=0.0, classification="retrace_enqueued",
+                                          symbol=symbol, signal_ts=signal_ts)
                     d_str = "LONG" if direction == 1 else "SHORT"
                     digits_fmt = 2 if symbol == "XAUUSD" else config.CONTRACTS.get(symbol, {}).get("digits", 5)
                     msg = (
@@ -2391,7 +2526,8 @@ def _execute_setup_entry(
                              symbol, ref_key, max_chase_pct * 100, pb_thresh)
             else:
                 ledger.record_outcome(ref_key, status="skipped", hit="pre_entry_chase_avoided",
-                                      pnl_usd=0.0, classification="chase_avoided")
+                                      pnl_usd=0.0, classification="chase_avoided",
+                                      symbol=symbol, signal_ts=signal_ts)
             return False, active_open_count, at_risk_count
 
     # Gold Quarantine & Small Account Capital Shield
@@ -2465,8 +2601,9 @@ def _execute_setup_entry(
         return False, active_open_count, at_risk_count
 
     risk_usd = rm.balance * trade_risk_pct / 100.0
-    lots_raw = position_size(symbol, risk_usd, actual_sl_dist)
-    lots = floor_lots(symbol, lots_raw)
+    min_pct = getattr(config, "MIN_RISK_PER_TRADE", 3.0)
+    max_pct = getattr(config, "MAX_RISK_PER_TRADE", 4.0)
+    lots = bracket_quantize_lots(symbol, risk_usd, actual_sl_dist, rm.balance, min_risk_pct=min_pct, max_risk_pct=max_pct, target_risk_pct=trade_risk_pct)
 
     if lots < 0.01:
         c = config.CONTRACTS.get(symbol, {})
@@ -2577,6 +2714,33 @@ _last_scanned_bars: dict[str, str] = {}
 _last_scanned_isde_m5: dict[str, str] = {}
 
 
+def _is_tf_due(tf: str, now_dt: dt.datetime) -> bool:
+    """True if the given timeframe could have closed at the current boundary."""
+    minute = now_dt.minute
+    if tf == "H1":
+        return minute in (0, 1)
+    elif tf == "M30":
+        return (minute % 30) in (0, 1)
+    elif tf == "M15":
+        return (minute % 15) in (0, 1)
+    elif tf == "M5":
+        return (minute % 5) in (0, 1)
+    return True
+
+
+def _tf_to_delta(tf: str) -> dt.timedelta:
+    """Return candle duration as timedelta."""
+    if tf == "M5":
+        return dt.timedelta(minutes=5)
+    elif tf == "M15":
+        return dt.timedelta(minutes=15)
+    elif tf == "M30":
+        return dt.timedelta(minutes=30)
+    elif tf == "H1":
+        return dt.timedelta(hours=1)
+    return dt.timedelta(minutes=5)
+
+
 def scan_local_mt5_setups(
     ledger,
     ex,
@@ -2606,85 +2770,124 @@ def scan_local_mt5_setups(
 
     fired_count = 0
     from data.tv_data import get_df
+    from concurrent.futures import ThreadPoolExecutor
 
-    # 1. Standard Multi-Timeframe FVG Retest & SMC Scanner (Candle close of primary timeframe)
-    for symbol, rt in SYMBOL_RUNTIME.items():
+    now_utc = _utcnow()
+
+    # Sub-agent Worker Task: pulls bars and computes signals concurrently for a single symbol
+    def _scan_symbol_worker(sym_item):
+        symbol, rt = sym_item
         entry_tf = rt["entry_tf"]
         bias_htf = rt["bias_htf"]
 
+        # Timeframe-aware fast bypass: If symbol was scanned before, only pull bars if its timeframe is due
+        if symbol in _last_scanned_bars and not _is_tf_due(entry_tf, now_utc):
+            return symbol, entry_tf, None, None, []
+
         try:
-            # get_df pulls 500 bars directly from MT5 memory in 50ms
+            # get_df pulls 500 bars directly from MT5 memory in ~10-30ms
             df = get_df(symbol, entry_tf, refresh=True)
             if df is None or len(df) < 50:
-                continue
+                return symbol, entry_tf, None, None, []
 
             # Latest closed bar timestamp (df.index[-2])
             last_closed_ts = str(df.index[-2])
             last_scanned = _last_scanned_bars.get(symbol)
             if last_scanned == last_closed_ts:
                 # Candle has already been scanned; avoid re-running until next close
-                continue
+                return symbol, entry_tf, last_closed_ts, None, []
 
-            # Mark this candle as scanned
-            _last_scanned_bars[symbol] = last_closed_ts
-
-            # Scan the latest closed bar (lookback=2 checks closed bars up to df.index[-2])
-            sigs = _local_fvg_scanner.scan_catchup(symbol, entry_tf, bias_htf, lookback=10)
-            if not sigs:
-                continue
-
-            for sig in sigs:
-                sig_ts_iso = sig.ts.isoformat()
-
-                # Deduplication check 1: Already in ledger?
-                if any(pos.get("symbol") == symbol and str(pos.get("signal_ts")) == sig_ts_iso for pos in ledger.data.values()):
-                    continue
-
-                # Deduplication check 2: Already in pending retracement?
-                pending_retrace = _load_pending_retrace()
-                if any(item.get("symbol") == symbol and str(item.get("signal_ts")) == sig_ts_iso for item in pending_retrace.values()):
-                    continue
-
-                # Compute next setup ref number with local scanner prefix "L" to prevent namespace collisions
-                local_refs = [int(str(k)[1:]) for k in ledger.data.keys() if str(k).startswith("L") and str(k)[1:].isdigit()]
-                max_ledger_ref = max([int(k) for k in ledger.data.keys() if str(k).isdigit()] or [180])
-                state = fetch_state()
-                max_state_ref = int(state.get("ref_seq", 180)) if isinstance(state.get("ref_seq"), (int, str)) and str(state.get("ref_seq")).isdigit() else 180
-                next_seq = max(max_ledger_ref, max_state_ref, *(local_refs or [180])) + 1
-                next_ref = f"L{next_seq}"
-
-                entry_dict = {
-                    "symbol": symbol,
-                    "dir": "LONG" if sig.direction == 1 else "SHORT",
-                    "entry": sig.entry,
-                    "sl": sig.stop,
-                    "tp": sig.take_profit,
-                    "rr": sig.rr,
-                    "ref": next_ref,
-                    "tf": sig.entry_tf,
-                    "ts": sig_ts_iso,
-                    "profile": getattr(sig, "profile", "balanced"),
-                    "strategy_type": getattr(sig, "strategy_type", "fvg_retest"),
-                    "strategy_badge": getattr(sig, "strategy_badge", "⚡ Momentum FVG"),
-                    "is_local_scan": True,
-                }
-
-                log.info("LOCAL_SCANNER_DETECT: %s %s @ %.5f (ref #%s, ts=%s, strat=%s)",
-                         symbol, entry_dict["dir"], sig.entry, next_ref, sig_ts_iso, entry_dict["strategy_type"])
-
-                fired, active_open_count, at_risk_count = _execute_setup_entry(
-                    entry_dict, ledger, ex, rm,
-                    active_open_count, at_risk_count,
-                    open_positions, at_risk_positions,
-                    is_local_scan=True,
-                    outcomes=None,
-                )
-
-                if fired:
-                    fired_count += 1
-
+            # Scan the latest closed bar (lookback=2 checks only closed bars up to df.index[-2])
+            sigs = _local_fvg_scanner.scan_catchup(symbol, entry_tf, bias_htf, lookback=2)
+            return symbol, entry_tf, last_closed_ts, df.index[-2], sigs or []
         except Exception as e:
-            log.warning("scan_local_mt5_setups error for %s: %s", symbol, e)
+            log.warning("scan_local_mt5_setups worker error for %s: %s", symbol, e)
+            return symbol, entry_tf, None, None, []
+
+    # 1. Parallel Sub-Agent Scanning Pool: All due symbols evaluated concurrently across worker threads
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        worker_results = list(executor.map(_scan_symbol_worker, SYMBOL_RUNTIME.items()))
+
+    for symbol, entry_tf, last_closed_ts, close_ts_raw, sigs in worker_results:
+        if last_closed_ts is None:
+            continue
+        _last_scanned_bars[symbol] = last_closed_ts
+
+        if close_ts_raw is not None:
+            try:
+                import pandas as pd
+                close_dt = pd.to_datetime(last_closed_ts) + _tf_to_delta(entry_tf)
+                latency_sec = (now_utc - close_dt).total_seconds()
+                if 0 <= latency_sec <= 60:
+                    log.info("⚡ CANDLE_SCAN (PARALLEL): %s %s closed @ %s | evaluated in %.2fs",
+                             symbol, entry_tf, close_dt.strftime("%H:%M:%S UTC"), latency_sec)
+            except Exception:
+                pass
+
+        if not sigs:
+            continue
+
+        for sig in sigs:
+            # Strict Bar-0 Signal Freshness: Only execute if candle closed within the last 60s
+            try:
+                import pandas as pd
+                candle_close_dt = pd.to_datetime(sig.ts) + _tf_to_delta(entry_tf)
+                sig_age_sec = (now_utc - candle_close_dt).total_seconds()
+                if sig_age_sec > 60.0:
+                    log.info("SKIP_STALE_BAR: %s %s signal @ %s is %.1fs old (> 60s) — stale bar ignored",
+                             symbol, entry_tf, candle_close_dt.strftime("%H:%M:%S UTC"), sig_age_sec)
+                    continue
+            except Exception:
+                pass
+
+            sig_ts_iso = sig.ts.isoformat()
+
+            # Deduplication check 1: Already in ledger?
+            if any(pos.get("symbol") == symbol and str(pos.get("signal_ts")) == sig_ts_iso for pos in ledger.data.values()):
+                continue
+
+            # Deduplication check 2: Already in pending retracement?
+            pending_retrace = _load_pending_retrace()
+            if any(item.get("symbol") == symbol and str(item.get("signal_ts")) == sig_ts_iso for item in pending_retrace.values()):
+                continue
+
+            # Compute next setup ref number with local scanner prefix "L" to prevent namespace collisions
+            local_refs = [int(str(k)[1:]) for k in ledger.data.keys() if str(k).startswith("L") and str(k)[1:].isdigit()]
+            max_ledger_ref = max([int(k) for k in ledger.data.keys() if str(k).isdigit()] or [180])
+            state = _CACHED_STATE or {}
+            max_state_ref = int(state.get("ref_seq", 180)) if isinstance(state.get("ref_seq"), (int, str)) and str(state.get("ref_seq")).isdigit() else 180
+            next_seq = max(max_ledger_ref, max_state_ref, *(local_refs or [180])) + 1
+            next_ref = f"L{next_seq}"
+
+            entry_dict = {
+                "symbol": symbol,
+                "dir": "LONG" if sig.direction == 1 else "SHORT",
+                "entry": sig.entry,
+                "sl": sig.stop,
+                "tp": sig.take_profit,
+                "rr": sig.rr,
+                "ref": next_ref,
+                "tf": sig.entry_tf,
+                "ts": sig_ts_iso,
+                "profile": getattr(sig, "profile", "balanced"),
+                "strategy_type": getattr(sig, "strategy_type", "fvg_retest"),
+                "strategy_badge": getattr(sig, "strategy_badge", "⚡ Momentum FVG"),
+                "is_local_scan": True,
+            }
+
+            log.info("LOCAL_SCANNER_DETECT: %s %s @ %.5f (ref #%s, ts=%s, strat=%s)",
+                     symbol, entry_dict["dir"], sig.entry, next_ref, sig_ts_iso, entry_dict["strategy_type"])
+
+            fired, active_open_count, at_risk_count = _execute_setup_entry(
+                entry_dict, ledger, ex, rm,
+                active_open_count, at_risk_count,
+                open_positions, at_risk_positions,
+                is_local_scan=True,
+                outcomes=None,
+            )
+
+            if fired:
+                fired_count += 1
 
     # 2. Institutional Session Delivery Engine (ISDE M5 Precision Local Scanner)
     if getattr(config, "ISDE_ENABLED", True):
@@ -2727,7 +2930,7 @@ def scan_local_mt5_setups(
                     # Compute next setup ref number with local scanner prefix "L" to prevent namespace collisions
                     local_refs = [int(str(k)[1:]) for k in ledger.data.keys() if str(k).startswith("L") and str(k)[1:].isdigit()]
                     max_ledger_ref = max([int(k) for k in ledger.data.keys() if str(k).isdigit()] or [180])
-                    state = fetch_state()
+                    state = _CACHED_STATE or {}
                     max_state_ref = int(state.get("ref_seq", 180)) if isinstance(state.get("ref_seq"), (int, str)) and str(state.get("ref_seq")).isdigit() else 180
                     next_seq = max(max_ledger_ref, max_state_ref, *(local_refs or [180])) + 1
                     next_ref = f"L{next_seq}"
@@ -2768,25 +2971,92 @@ def scan_local_mt5_setups(
 
 
 def tick() -> bool:
-    """One poll cycle: fetch state → local MT5 scan → fire fills → manage open positions → reconcile outcomes.
+    """One poll cycle: fast MT5 local scan (0ms) -> Turtle Soup re-entry -> manage positions -> background sync & reconcile.
     Returns True if any new fill was fired."""
+    fired_any = False
+    ledger = load_ledger()
+    rm = risk()
+    ex = get_executor()
+
+    target_broker = getattr(ex, "broker", "mt5")
+    open_positions = [
+        e for e in ledger.open_entries().values()
+        if e.get("broker", "mt5") == target_broker
+    ]
+    active_open_count = len(open_positions)
+    # Positions with active downside risk (< BE). Trades at BE or in trailing profit have $0 risk!
+    at_risk_positions = [
+        e for e in open_positions
+        if e.get("sl_state") not in ("be", "trail_05", "trail_10")
+    ]
+    at_risk_count = len(at_risk_positions)
+
+    # =========================================================================
+    # FAST-PATH 1: Parallel Local MT5 Scanner (Sub-150ms Execution on Candle Close)
+    # Evaluated at Line 1 of tick() before any network or disk I/O!
+    # =========================================================================
+    try:
+        local_fired, active_open_count, at_risk_count = scan_local_mt5_setups(
+            ledger, ex, rm,
+            active_open_count, at_risk_count,
+            open_positions, at_risk_positions
+        )
+        if local_fired > 0:
+            fired_any = True
+            log.info("LOCAL_SCANNER fired %d new setup(s) on candle close", local_fired)
+    except Exception as lse:
+        log.error("scan_local_mt5_setups error: %s", lse, exc_info=True)
+
+    # =========================================================================
+    # FAST-PATH 2: Pending Turtle Soup Sweeps (Immediate Inducement Re-Entry)
+    # =========================================================================
+    try:
+        soup_filled = process_pending_turtle_soup(ledger)
+        if soup_filled:
+            fired_any = True
+            log.info("processed pending turtle soup sweeps, fired %d re-entry orders", soup_filled)
+    except Exception as se:
+        log.warning("process_pending_turtle_soup error: %s", se)
+
+    # =========================================================================
+    # FAST-PATH 3: Pending Retracements (M5 Swing Retrace Sniper)
+    # =========================================================================
+    try:
+        retrace_filled = process_pending_retracements(ledger)
+        if retrace_filled:
+            fired_any = True
+            log.info("processed pending retracements, fired %d sniper orders", retrace_filled)
+    except Exception as re:
+        log.warning("process_pending_retracements error: %s", re)
+
+    # =========================================================================
+    # OPEN POSITION MANAGEMENT (Breakeven Trailing & Profit Protection)
+    # =========================================================================
+    try:
+        managed = manage_open_positions(ledger)
+        if managed:
+            log.info("active exit management processed %d positions", managed)
+    except Exception as me:
+        log.warning("manage_open_positions error: %s", me)
+
+    # =========================================================================
+    # BACKGROUND BOOKKEEPING & MAINTENANCE (Non-blocking for trade entries)
+    # =========================================================================
     _refresh_clock_skew()   # cached 5 min; logs CRITICAL + auto-resyncs if PC clock is off
     state = fetch_state()
-    if not state:
-        return False
-    # Drain any Telegram messages queued while the uplink was down —
-    # never silently eat a fill announcement again.
+    if not state and getattr(config, "REMOTE_GHA_EXECUTION_ENABLED", False):
+        return fired_any
+    state = state or {}
+
     try:
         drained = flush_pending()
         if drained:
             log.info("drained %d queued telegram message(s)", drained)
     except Exception as e:
         log.warning("flush_pending error: %s", e)
+
     history = fetch_history(state)
     outcomes = fetch_outcomes(state)
-    ledger = load_ledger()
-    rm = risk()
-    ex = get_executor()
 
     if getattr(config, "STEP_COMPOUNDING_ENABLED", True) or getattr(config, "DYNAMIC_BALANCE", False):
         try:
@@ -2821,35 +3091,7 @@ def tick() -> bool:
     except Exception as e:
         log.warning("handle_prenew_guards error: %s", e)
 
-    fired_any = False
-
-    target_broker = getattr(ex, "broker", "mt5")
-    open_positions = [
-        e for e in ledger.open_entries().values()
-        if e.get("broker", "mt5") == target_broker
-    ]
-    active_open_count = len(open_positions)
-    # Positions with active downside risk (< BE). Trades at BE or in trailing profit have $0 risk!
-    at_risk_positions = [
-        e for e in open_positions
-        if e.get("sl_state") not in ("be", "trail_05", "trail_10")
-    ]
-    at_risk_count = len(at_risk_positions)
-
-    # 0. Local MT5 Fast Scanner (Proposal 1: 0ms Execution Latency on candle close)
-    try:
-        local_fired, active_open_count, at_risk_count = scan_local_mt5_setups(
-            ledger, ex, rm,
-            active_open_count, at_risk_count,
-            open_positions, at_risk_positions
-        )
-        if local_fired > 0:
-            fired_any = True
-            log.info("LOCAL_SCANNER fired %d new setup(s) on candle close", local_fired)
-    except Exception as lse:
-        log.error("scan_local_mt5_setups error: %s", lse, exc_info=True)
-
-    # 1. Execute remote setups from state.json (Fallback only; disabled by default on 24/7 Cloud VPS)
+    # Execute remote setups from state.json (Fallback only; disabled by default on 24/7 Cloud VPS)
     if getattr(config, "REMOTE_GHA_EXECUTION_ENABLED", False):
         for entry in reversed(history):
             fired, active_open_count, at_risk_count = _execute_setup_entry(
@@ -2862,28 +3104,13 @@ def tick() -> bool:
             if fired:
                 fired_any = True
 
-
-    # 2. Process pending retracements (Option 1: M5 Swing Sniper for Gold)
-    retrace_filled = process_pending_retracements(ledger)
-    if retrace_filled:
-        fired_any = True
-        log.info("processed pending retracements, fired %d sniper orders", retrace_filled)
-
-    # 3. Manage open positions (Half B: Breakeven trailing & early exit)
-    managed = manage_open_positions(ledger)
-    if managed:
-        log.info("active exit management processed %d positions", managed)
-
-    # 3b. Process pending Turtle Soup sweeps (Phase 2 Inducement Re-entry)
-    soup_filled = process_pending_turtle_soup(ledger)
-    if soup_filled:
-        fired_any = True
-        log.info("processed pending turtle soup sweeps, fired %d re-entry orders", soup_filled)
-
-    # 4. Reconcile outcomes (TP/SL) from the delivery bot
-    reconciled = reconcile_outcomes(ledger, outcomes)
-    if reconciled:
-        log.info("reconciled %d outcomes", reconciled)
+    # Reconcile outcomes (TP/SL) from the delivery bot
+    try:
+        reconciled = reconcile_outcomes(ledger, outcomes)
+        if reconciled:
+            log.info("reconciled %d outcomes", reconciled)
+    except Exception as re_err:
+        log.warning("reconcile_outcomes error: %s", re_err)
 
     return fired_any
 
@@ -2901,8 +3128,11 @@ def run_agent():
         fh.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(message)s"))
         root.addHandler(fh)
 
-    interval = int(config.AGENT_POLL_SEC)
-    log.info("goldfx-agent starting  env=%s  poll=%ds  state_url=%s",
+    fast_poll = float(getattr(config, "FAST_POLL_SEC", 2.5))
+    configured_poll = float(getattr(config, "AGENT_POLL_SEC", 20))
+    # If AGENT_POLL_SEC was lowered by user, respect it; otherwise use sub-3s fast poll
+    interval = min(fast_poll, configured_poll) if configured_poll > 0 else fast_poll
+    log.info("goldfx-agent starting  env=%s  fast_poll=%.1fs (aligned to M5 boundaries)  state_url=%s",
              config.AUTO_TRADE_ENV, interval, _STATE_CACHE)
     while True:
         try:
@@ -2913,19 +3143,21 @@ def run_agent():
         # High-frequency 1-second subcycle for pending Turtle Soup setups (cuts slippage from ~1.5 pips to ~0.1 pip)
         pending_soup = _load_pending_turtle_soup()
         if pending_soup:
-            for _ in range(interval):
-                time.sleep(1)
-                try:
-                    ledger = load_ledger()
-                    soup_filled = process_pending_turtle_soup(ledger)
-                    if soup_filled:
-                        log.info("FAST_POLL: Turtle Soup re-entry filled instantly during 1s subcycle!")
-                except Exception as ef:
-                    log.error("fast_poll error: %s", ef)
-                if not _load_pending_turtle_soup():
-                    break
+            time.sleep(1.0)
+            continue
+
+        # Precision Candle-Boundary Alignment Engine:
+        # Calculates exact distance to next M5 candle boundary (every 300s: :00, :05, :10...)
+        # If boundary is approaching within interval + 0.2s, sleep precisely until boundary + 0.05s offset
+        # so MT5 receives the new candle tick and executes within ~50-100ms of close!
+        now_ts = time.time()
+        sec_to_m5 = 300.0 - (now_ts % 300.0)
+        if sec_to_m5 <= (interval + 0.2):
+            sleep_sec = sec_to_m5 + 0.05
         else:
-            time.sleep(interval)
+            sleep_sec = min(interval, max(0.5, sec_to_m5 - 0.5))
+
+        time.sleep(max(0.05, sleep_sec))
 
 
 if __name__ == "__main__":

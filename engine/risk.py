@@ -90,9 +90,9 @@ def get_or_update_anchor_balance(live_balance: float | None = None) -> float:
             log.warning("failed to write %s: %s", ANCHOR_FILE, e)
         return float(new_anchor)
 
-    # 2. Drawdown safety trigger (> 25% below anchor)
-    dd_reset_pct = float(getattr(config, "STEP_DRAWDOWN_RESET_PCT", 25.0))
-    if live_balance and live_balance > 0:
+    # 2. Drawdown safety trigger (Disabled by default to prevent valley-sizing and maintain constant weekly expectancy)
+    if getattr(config, "STEP_DRAWDOWN_RESET_ENABLED", False) and live_balance and live_balance > 0:
+        dd_reset_pct = float(getattr(config, "STEP_DRAWDOWN_RESET_PCT", 50.0))
         if live_balance < stored_anchor * (1.0 - dd_reset_pct / 100.0):
             data["anchor_balance"] = round(live_balance, 2)
             data["last_updated"] = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -198,10 +198,11 @@ class RiskManager:
 
         risk_pct_used = self._rule_risk_cap()
         risk_usd = self.balance * risk_pct_used / 100.0
-        lots = position_size(symbol, risk_usd, sl_dist)
-        lots = floor_lots(symbol, lots)
-        rd = RiskDecision(True, lots, round(risk_usd, 2), rr, "ok", msgs)
-        rd.lots = floor_lots(symbol, rd.lots)
+        min_pct = getattr(config, "MIN_RISK_PER_TRADE", 3.0)
+        max_pct = getattr(config, "MAX_RISK_PER_TRADE", 4.0)
+        lots = bracket_quantize_lots(symbol, risk_usd, sl_dist, self.balance, min_risk_pct=min_pct, max_risk_pct=max_pct, target_risk_pct=risk_pct_used)
+        actual_dollar_risk = risk_amount(symbol, lots, sl_dist) if lots > 0 else 0.0
+        rd = RiskDecision(True, lots, round(actual_dollar_risk if actual_dollar_risk > 0 else risk_usd, 2), rr, "ok", msgs)
         return rd
 
 
@@ -242,6 +243,63 @@ def floor_lots(symbol: str, lots: float) -> float:
         pass
     lots = math.floor(max(lots, 0.0) / step) * step
     return round(lots, 2)
+
+
+def bracket_quantize_lots(symbol: str, target_risk_usd: float, sl_distance: float,
+                          balance: float, min_risk_pct: float = 3.0,
+                          max_risk_pct: float = 4.0, target_risk_pct: float = 3.5) -> float:
+    """Smart lot quantizer that targets the user's dedicated risk percentage (e.g. 3.5%)
+    and keeps dollar risk strictly inside [min_risk_pct, max_risk_pct] (e.g. 3.0% - 4.0%).
+    
+    Prevents the severe mathematical expectancy degradation caused by blind downward flooring
+    on small-account indices (where 0.017 lots floored to 0.01 drops risk to 1.1%, halving profits).
+    """
+    if sl_distance <= 0 or balance <= 0 or target_risk_usd <= 0:
+        return 0.0
+
+    step = 0.01
+    vol_min = 0.01
+    vol_max = 100.0
+    try:
+        import MetaTrader5 as mt5
+        info = mt5.symbol_info(symbol)
+        if info:
+            if info.volume_step > 0:
+                step = info.volume_step
+            if info.volume_min > 0:
+                vol_min = info.volume_min
+            if info.volume_max > 0:
+                vol_max = info.volume_max
+    except Exception:
+        pass
+
+    raw_lots = position_size(symbol, target_risk_usd, sl_distance)
+    if raw_lots <= 0:
+        return 0.0
+
+    lots_floor = round(math.floor(raw_lots / step) * step, 2)
+    lots_ceil = round(math.ceil(raw_lots / step) * step, 2)
+
+    if lots_ceil < vol_min:
+        lots_ceil = vol_min
+
+    risk_floor = risk_amount(symbol, lots_floor, sl_distance) if lots_floor >= vol_min else 0.0
+    risk_ceil = risk_amount(symbol, lots_ceil, sl_distance)
+
+    pct_floor = (risk_floor / balance) * 100.0
+    pct_ceil = (risk_ceil / balance) * 100.0
+
+    # If flooring drops risk below target minimum (e.g. < 3.0%),
+    # but ceil keeps risk <= max_risk_pct (e.g. <= 4.0%), choose ceil!
+    if pct_floor < min_risk_pct and pct_ceil <= max_risk_pct:
+        chosen = lots_ceil
+    elif pct_ceil <= max_risk_pct and abs(pct_ceil - target_risk_pct) < abs(pct_floor - target_risk_pct):
+        chosen = lots_ceil
+    else:
+        chosen = lots_floor
+
+    chosen = max(vol_min if lots_floor >= vol_min or pct_ceil <= max_risk_pct else 0.0, min(chosen, vol_max))
+    return round(chosen, 2)
 
 
 def risk_amount(symbol: str, lots: float, sl_distance: float) -> float:

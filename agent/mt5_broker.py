@@ -189,6 +189,31 @@ class Mt5Broker:
             rates = mt5.copy_rates_from_pos(symbol, mt5.TIMEFRAME_M1, 0, 1)
             if rates is not None and len(rates) > 0:
                 price = float(rates[0][4])
+
+        # Adverse Slippage Guard: If market price drifted too far from the caller's entry price
+        if entry > 0 and price > 0:
+            c_info = config.CONTRACTS.get(symbol, {})
+            pip_size = 0.10 if symbol == "XAUUSD" else (0.01 if "JPY" in symbol else (1.0 if any(idx in symbol for idx in ["100", "500", "30"]) else 0.0001))
+
+            # Deduct natural broker spread so normal Bid/Ask difference does not trigger false reject
+            spread_pts = 0.0
+            if info and hasattr(info, "spread") and info.spread > 0 and hasattr(info, "point") and info.point > 0:
+                spread_pts = float(info.spread) * float(info.point)
+
+            raw_diff = abs(price - entry)
+            # Net adverse drift beyond spread
+            adverse_diff = max(0.0, raw_diff - spread_pts)
+            slip_pips = adverse_diff / pip_size if pip_size > 0 else 0.0
+
+            max_slip = float(getattr(config, "MAX_SPREAD_GOLD", 5.0)) if symbol == "XAUUSD" else (
+                float(getattr(config, "MAX_SPREAD_INDEX", 8.0)) if any(idx in symbol for idx in ["100", "500", "30"]) else float(getattr(config, "MAX_ENTRY_SLIPPAGE_PIPS", 3.0))
+            )
+            # If price slipped beyond maximum allowed tolerance:
+            if slip_pips > max_slip:
+                log.warning("SLIPPAGE_GUARD_REJECT: %s price slipped %.1f pips (net of spread) from entry %.5f to live %.5f (max allowed %.1f pips)",
+                            symbol, slip_pips, entry, price, max_slip)
+                return Fill(ok=False, symbol=symbol, direction=direction, lots=lots,
+                            message=f"SLIPPAGE_GUARD_REJECT: price slipped {slip_pips:.1f} pips from {entry:.5f} to {price:.5f}")
         # Idempotency check: if an open position with this label already exists, do not duplicate
         positions = mt5.positions_get(symbol=symbol)
         if positions:
@@ -323,8 +348,8 @@ class Mt5Broker:
             return float(tick.ask - tick.bid)
         return 0.0
 
-    def get_spread_pips(self, symbol: str) -> tuple[float, float]:
-        """Return (spread_pips, current_price)."""
+    def get_spread_pips(self, symbol: str, direction: int = 1) -> tuple[float, float]:
+        """Return (spread_pips, current_price). Respects trade direction (bid for SELL, ask for BUY)."""
         mt5 = _import_mt5()
         mt5.symbol_select(symbol, True)
         tick = mt5.symbol_info_tick(symbol)
@@ -332,7 +357,10 @@ class Mt5Broker:
             return 0.0, 0.0
         ask = getattr(tick, "ask", 0.0)
         bid = getattr(tick, "bid", 0.0)
-        cur = ask if ask > 0 else bid
+        if direction == -1:
+            cur = bid if bid > 0 else ask
+        else:
+            cur = ask if ask > 0 else bid
         spread_price = ask - bid if (ask > 0 and bid > 0) else 0.0
         pip_unit = 0.01 if "JPY" in symbol or symbol == "XAUUSD" else (1.0 if any(idx in symbol for idx in ["100", "500", "30"]) else 0.0001)
         spread_pips = spread_price / pip_unit if pip_unit > 0 else 0.0

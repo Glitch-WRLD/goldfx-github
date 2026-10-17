@@ -356,16 +356,12 @@ class FVGScanner:
             if any(lo <= ts_hour < hi for lo, hi in skip):
                 return None
 
-        # HALF A — LTF (M15) confirmation: refine entry price & RR if confirmed
+        # HALF A — LTF (M15) confirmation: record directional confirmation flag without overwriting live entry price
         ltf_confirmed = False
         ltf_tf = ""
         if entry_tf in ("M30", "H1"):
-            is_conf, ltf_fill = self._confirm_ltf_m15(symbol, side, sig.ts, sl)
-            if is_conf and ltf_fill > 0:
-                entry = ltf_fill
-                risk = abs(entry - sl)
-                if risk > 0:
-                    rr = abs(tp - entry) / risk
+            is_conf, _ = self._confirm_ltf_m15(symbol, side, sig.ts, sl)
+            if is_conf:
                 ltf_confirmed = True
                 ltf_tf = "M15"
 

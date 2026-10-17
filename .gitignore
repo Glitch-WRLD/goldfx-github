@@ -21,4 +21,6 @@ reports/*.json
 reports/*.md
 
 # misc
-.DS_Store
+.DS_Store
+vps_config.json
+scratch/
