@@ -155,6 +155,7 @@
   "GBPUSD:2026-10-16T04:00:00+00:00",
   "GBPUSD:2026-10-16T08:00:00+00:00",
   "GBPUSD:2026-10-16T20:00:00+00:00",
+  "GBPUSD:2026-10-19T11:00:00+00:00",
   "NASDAQ-100:2026-09-30T07:45:00+00:00",
   "NASDAQ-100:2026-09-30T09:15:00+00:00",
   "NASDAQ-100:2026-09-30T23:15:00+00:00",
@@ -498,6 +499,20 @@
   "XAUUSD:2026-10-19T07:00:00+00:00"
  ],
  "history": [
+  {
+   "dir": "LONG",
+   "entry": 1.33351,
+   "profile": "balanced",
+   "ref": 461,
+   "rr": 1.33,
+   "sl": 1.3307530098022609,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "GBPUSD",
+   "tf": "H1",
+   "tp": 1.33718,
+   "ts": "2026-10-19T11:00:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 29513.5,
@@ -9957,6 +9972,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 460,
+ "ref_seq": 461,
  "zones": []
 }
