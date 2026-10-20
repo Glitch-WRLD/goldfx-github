@@ -18,7 +18,7 @@ import logging
 _MUTEX_HANDLE = None
 
 
-def acquire_single_instance_mutex(mutex_name: str = "Local\\GoldFX_Agent_SingleInstance_Mutex") -> bool:
+def acquire_single_instance_mutex(mutex_name: str = "Global\\GoldFX_Agent_SingleInstance_Mutex") -> bool:
     """Ensure strictly ONE instance of goldfx-agent runs on the machine at any time."""
     global _MUTEX_HANDLE
     try:
