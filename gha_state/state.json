@@ -531,9 +531,24 @@
   "XAUUSD:2026-10-20T07:40:00+00:00",
   "XAUUSD:2026-10-20T08:55:00+00:00",
   "XAUUSD:2026-10-20T09:30:00+00:00",
-  "XAUUSD:2026-10-20T16:00:00+00:00"
+  "XAUUSD:2026-10-20T16:00:00+00:00",
+  "XAUUSD:2026-10-20T16:30:00+00:00"
  ],
  "history": [
+  {
+   "dir": "SHORT",
+   "entry": 4121.29,
+   "profile": "balanced",
+   "ref": 497,
+   "rr": 0.7,
+   "sl": 4135.6508947665,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "XAUUSD",
+   "tf": "M30",
+   "tp": 4111.23737366345,
+   "ts": "2026-10-20T16:30:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 4123.705,
@@ -10770,6 +10785,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 496,
+ "ref_seq": 497,
  "zones": []
 }
