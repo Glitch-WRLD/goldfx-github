@@ -206,18 +206,40 @@ class RiskManager:
         return rd
 
 
+def get_symbol_spread_distance(symbol: str) -> float:
+    """Return live broker spread in price distance points, or conservative contract fallback.
+    Used for Spread-Inclusive Position Sizing so realized loss on stop-out exactly matches intended risk.
+    """
+    try:
+        import MetaTrader5 as mt5
+        info = mt5.symbol_info(symbol)
+        if info and info.spread > 0 and info.point > 0:
+            return float(info.spread * info.point)
+    except Exception:
+        pass
+    c = config.CONTRACTS.get(symbol, {})
+    point = float(c.get("point", 0.00001))
+    typical_spreads = {"US500": 1.90, "NASDAQ-100": 2.50, "DJ30": 5.0, "XAUUSD": 0.35}
+    return float(typical_spreads.get(symbol, point * 15))
+
+
 def position_size(symbol: str, risk_usd: float, sl_distance: float) -> float:
-    """lots = risk_$ / (sl_distance_per_point * value_per_point_per_lot).
-    Dynamically queries live broker tick size & value from MT5 memory if available.
+    """lots = risk_$ / (effective_sl_distance_per_point * value_per_point_per_lot).
+    Dynamically queries live broker tick size & value from MT5 memory if available,
+    and includes broker spread in effective risk distance so stop-out dollar losses
+    consistently match intended risk_usd without overshoot.
     """
     if sl_distance <= 0 or risk_usd <= 0:
         return 0.0
+
+    spread_dist = get_symbol_spread_distance(symbol)
+    effective_sl = sl_distance + spread_dist
 
     try:
         import MetaTrader5 as mt5
         info = mt5.symbol_info(symbol)
         if info and info.trade_tick_size > 0 and info.trade_tick_value > 0:
-            loss_per_lot = (sl_distance / info.trade_tick_size) * info.trade_tick_value
+            loss_per_lot = (effective_sl / info.trade_tick_size) * info.trade_tick_value
             if loss_per_lot > 0:
                 return risk_usd / loss_per_lot
     except Exception:
@@ -226,7 +248,7 @@ def position_size(symbol: str, risk_usd: float, sl_distance: float) -> float:
     c = config.CONTRACTS.get(symbol, {})
     point = c.get("point", 0.00001)
     val = c.get("pip_value_per_lot_usd", 1.0)
-    points = sl_distance / point if point > 0 else 0.0
+    points = effective_sl / point if point > 0 else 0.0
     if points <= 0:
         return 0.0
     return risk_usd / (points * val)
@@ -303,17 +325,22 @@ def bracket_quantize_lots(symbol: str, target_risk_usd: float, sl_distance: floa
 
 
 def risk_amount(symbol: str, lots: float, sl_distance: float) -> float:
+    """Calculate expected realized loss at stop-loss including broker spread."""
+    if lots <= 0 or sl_distance <= 0:
+        return 0.0
+    spread_dist = get_symbol_spread_distance(symbol)
+    effective_sl = sl_distance + spread_dist
     try:
         import MetaTrader5 as mt5
         info = mt5.symbol_info(symbol)
         if info and info.trade_tick_size > 0 and info.trade_tick_value > 0:
-            return float(lots * (sl_distance / info.trade_tick_size) * info.trade_tick_value)
+            return float(lots * (effective_sl / info.trade_tick_size) * info.trade_tick_value)
     except Exception:
         pass
     c = config.CONTRACTS.get(symbol, {})
     point = c.get("point", 0.00001)
     val = c.get("pip_value_per_lot_usd", 1.0)
-    return lots * (sl_distance / point) * val
+    return lots * (effective_sl / point) * val
 
 
 def format_decimal(symbol: str, price: float) -> str:

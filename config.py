@@ -253,7 +253,7 @@ TURTLE_SOUP_EXEMPT_SYMBOLS  = set(os.getenv("TURTLE_SOUP_EXEMPT_SYMBOLS", "NASDA
 
 # Physical broker & spread buffer minimum stop floors per symbol (prevents micro-stop artifacts)
 TURTLE_SOUP_MIN_STOP_FLOOR  = {
-    "XAUUSD": float(os.getenv("TURTLE_SOUP_MIN_STOP_GOLD", "2.50")),    # $2.50 Gold floor (250 pts)
+    "XAUUSD": float(os.getenv("TURTLE_SOUP_MIN_STOP_GOLD", "5.00")),    # $5.00 Gold floor (500 pts, volatility-normalized for $4,130+ Gold)
     "EURUSD": float(os.getenv("TURTLE_SOUP_MIN_STOP_EURUSD", "0.00050")), # 5.0 pips
     "GBPUSD": float(os.getenv("TURTLE_SOUP_MIN_STOP_GBPUSD", "0.00050")), # 5.0 pips
     "USDJPY": float(os.getenv("TURTLE_SOUP_MIN_STOP_USDJPY", "0.050")),   # 5.0 pips
