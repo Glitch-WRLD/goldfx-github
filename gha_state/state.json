@@ -107,6 +107,7 @@
   "GBPAUD:2026-10-07T10:00:00+00:00",
   "GBPAUD:2026-10-13T12:00:00+00:00",
   "GBPAUD:2026-10-16T08:00:00+00:00",
+  "GBPAUD:2026-10-20T23:00:00+00:00",
   "GBPUSD:2026-09-14T23:00:00+00:00",
   "GBPUSD:2026-09-15T03:00:00+00:00",
   "GBPUSD:2026-09-15T08:00:00+00:00",
@@ -539,9 +540,38 @@
   "XAUUSD:2026-10-20T08:55:00+00:00",
   "XAUUSD:2026-10-20T09:30:00+00:00",
   "XAUUSD:2026-10-20T16:00:00+00:00",
-  "XAUUSD:2026-10-20T16:30:00+00:00"
+  "XAUUSD:2026-10-20T16:30:00+00:00",
+  "XAUUSD:2026-10-20T23:30:00+00:00"
  ],
  "history": [
+  {
+   "dir": "LONG",
+   "entry": 1.90866,
+   "profile": "balanced",
+   "ref": 506,
+   "rr": 1.4,
+   "sl": 1.9060279706845435,
+   "strategy_badge": "\ud83c\udfdb\ufe0f Institutional SMC Sweep",
+   "strategy_type": "smc_sweep",
+   "symbol": "GBPAUD",
+   "tf": "H1",
+   "tp": 1.912344841041639,
+   "ts": "2026-10-20T23:00:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 4114.055,
+   "profile": "balanced",
+   "ref": 505,
+   "rr": 0.7,
+   "sl": 4127.525781214126,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "XAUUSD",
+   "tf": "M30",
+   "tp": 4104.625453150112,
+   "ts": "2026-10-20T23:30:00+00:00"
+  },
   {
    "dir": "LONG",
    "entry": 29779.2,
@@ -10897,6 +10927,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 504,
+ "ref_seq": 506,
  "zones": []
 }
