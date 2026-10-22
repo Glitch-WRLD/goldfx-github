@@ -576,9 +576,39 @@
   "XAUUSD:2026-10-22T07:35:00+00:00",
   "XAUUSD:2026-10-22T07:50:00+00:00",
   "XAUUSD:2026-10-22T08:10:00+00:00",
-  "XAUUSD:2026-10-22T08:35:00+00:00"
+  "XAUUSD:2026-10-22T08:30:00+00:00",
+  "XAUUSD:2026-10-22T08:35:00+00:00",
+  "XAUUSD:2026-10-22T08:55:00+00:00"
  ],
  "history": [
+  {
+   "dir": "SHORT",
+   "entry": 4083.135,
+   "profile": "balanced",
+   "ref": 543,
+   "rr": 2.0,
+   "sl": 4091.0,
+   "strategy_badge": "\ud83c\udfaf ISDE Session Delivery",
+   "strategy_type": "isde_session",
+   "symbol": "XAUUSD",
+   "tf": "M5",
+   "tp": 4067.4050000000007,
+   "ts": "2026-10-22T08:55:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 4083.135,
+   "profile": "balanced",
+   "ref": 542,
+   "rr": 1.06,
+   "sl": 4098.557465593042,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "XAUUSD",
+   "tf": "M30",
+   "tp": 4066.8,
+   "ts": "2026-10-22T08:30:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 4088.425,
@@ -11730,6 +11760,13 @@
    "ts": "2026-10-21T23:30:00+00:00",
    "when": "2026-10-22 00:30:00+00:00"
   },
+  "XAUUSD:2026-10-22T07:35:00+00:00": {
+   "hit": "tp",
+   "price": 4081.670000000001,
+   "status": "posted",
+   "ts": "2026-10-22T07:35:00+00:00",
+   "when": "2026-10-22 09:00:00+00:00"
+  },
   "XAUUSD:2026-10-22T07:50:00+00:00": {
    "hit": "sl",
    "price": 4091.3849999999998,
@@ -11753,6 +11790,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 541,
+ "ref_seq": 543,
  "zones": []
 }
