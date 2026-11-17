@@ -1043,9 +1043,129 @@
   "XAUUSD:2026-11-13T10:30:00+00:00",
   "XAUUSD:2026-11-13T12:30:00+00:00",
   "XAUUSD:2026-11-13T16:30:00+00:00",
-  "XAUUSD:2026-11-13T19:30:00+00:00"
+  "XAUUSD:2026-11-13T19:30:00+00:00",
+  "XAUUSD:2026-11-17T00:00:00+00:00",
+  "XAUUSD:2026-11-17T00:30:00+00:00",
+  "XAUUSD:2026-11-17T07:30:00+00:00",
+  "XAUUSD:2026-11-17T07:40:00+00:00",
+  "XAUUSD:2026-11-17T07:45:00+00:00",
+  "XAUUSD:2026-11-17T08:00:00+00:00",
+  "XAUUSD:2026-11-17T08:05:00+00:00",
+  "XAUUSD:2026-11-17T08:15:00+00:00"
  ],
  "history": [
+  {
+   "dir": "SHORT",
+   "entry": 3864.54,
+   "profile": "balanced",
+   "ref": 1016,
+   "rr": 2.0,
+   "sl": 3867.4849999999997,
+   "strategy_badge": "\ud83c\udfaf ISDE Session Delivery",
+   "strategy_type": "isde_session",
+   "symbol": "XAUUSD",
+   "tf": "M5",
+   "tp": 3858.6500000000005,
+   "ts": "2026-11-17T08:15:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 3866.71,
+   "profile": "balanced",
+   "ref": 1015,
+   "rr": 2.0,
+   "sl": 3871.565,
+   "strategy_badge": "\ud83c\udfaf ISDE Session Delivery",
+   "strategy_type": "isde_session",
+   "symbol": "XAUUSD",
+   "tf": "M5",
+   "tp": 3857.0,
+   "ts": "2026-11-17T08:05:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 3867.355,
+   "profile": "balanced",
+   "ref": 1014,
+   "rr": 2.0,
+   "sl": 3873.6949999999997,
+   "strategy_badge": "\ud83c\udfaf ISDE Session Delivery",
+   "strategy_type": "isde_session",
+   "symbol": "XAUUSD",
+   "tf": "M5",
+   "tp": 3854.6750000000006,
+   "ts": "2026-11-17T08:00:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 3872.355,
+   "profile": "balanced",
+   "ref": 1013,
+   "rr": 2.0,
+   "sl": 3874.3399999999997,
+   "strategy_badge": "\ud83c\udfaf ISDE Session Delivery",
+   "strategy_type": "isde_session",
+   "symbol": "XAUUSD",
+   "tf": "M5",
+   "tp": 3868.3850000000007,
+   "ts": "2026-11-17T07:45:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 3872.44,
+   "profile": "balanced",
+   "ref": 1012,
+   "rr": 2.0,
+   "sl": 3876.81,
+   "strategy_badge": "\ud83c\udfaf ISDE Session Delivery",
+   "strategy_type": "isde_session",
+   "symbol": "XAUUSD",
+   "tf": "M5",
+   "tp": 3863.7000000000003,
+   "ts": "2026-11-17T07:40:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 3871.195,
+   "profile": "balanced",
+   "ref": 1011,
+   "rr": 1.4,
+   "sl": 3880.8499593971833,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "XAUUSD",
+   "tf": "M30",
+   "tp": 3857.678056843944,
+   "ts": "2026-11-17T07:30:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 3852.73,
+   "profile": "balanced",
+   "ref": 1010,
+   "rr": 1.4,
+   "sl": 3866.1401825525554,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "XAUUSD",
+   "tf": "M30",
+   "tp": 3833.9557444264224,
+   "ts": "2026-11-17T00:30:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 3855.785,
+   "profile": "balanced",
+   "ref": 1009,
+   "rr": 1.4,
+   "sl": 3866.3831773642905,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "XAUUSD",
+   "tf": "M30",
+   "tp": 3840.947551689993,
+   "ts": "2026-11-17T00:00:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 51963.4,
@@ -15151,6 +15271,13 @@
    "ts": "2026-11-13T19:00:00+00:00",
    "when": "2026-11-16 01:00:00+00:00"
   },
+  "AUDUSD:2026-11-16T20:00:00+00:00": {
+   "hit": "sl",
+   "price": 0.6747923837608126,
+   "status": "posted",
+   "ts": "2026-11-16T20:00:00+00:00",
+   "when": "2026-11-17 03:00:00+00:00"
+  },
   "DJ30:2026-09-29T02:00:00+00:00": {
    "hit": "sl",
    "price": 51499.29275978495,
@@ -18021,6 +18148,13 @@
    "ts": "2026-11-16T17:45:00+00:00",
    "when": "2026-11-16 18:15:00+00:00"
   },
+  "NASDAQ-100:2026-11-16T18:30:00+00:00": {
+   "hit": "sl",
+   "price": 27329.42792690543,
+   "status": "posted",
+   "ts": "2026-11-16T18:30:00+00:00",
+   "when": "2026-11-17 01:30:00+00:00"
+  },
   "NZDUSD:2026-09-22T01:00:00+00:00": {
    "hit": "sl",
    "price": 0.5716449434306773,
@@ -18454,6 +18588,13 @@
    "status": "posted",
    "ts": "2026-11-12T16:00:00+00:00",
    "when": "2026-11-12 19:00:00+00:00"
+  },
+  "NZDUSD:2026-11-16T20:00:00+00:00": {
+   "hit": "tp",
+   "price": 0.5490319877629019,
+   "status": "posted",
+   "ts": "2026-11-16T20:00:00+00:00",
+   "when": "2026-11-17 02:00:00+00:00"
   },
   "NZDUSD:2026-11-16T22:00:00+00:00": {
    "hit": "sl",
@@ -20145,7 +20286,7 @@
   "USDCHF:2026-11-13T18:00:00+00:00": {
    "hit": "sl",
    "price": 0.8379500398738753,
-   "status": "pending",
+   "status": "posted",
    "ts": "2026-11-13T18:00:00+00:00",
    "when": "2026-11-16 15:00:00+00:00"
   },
@@ -20435,6 +20576,13 @@
    "status": "posted",
    "ts": "2026-11-11T12:00:00+00:00",
    "when": "2026-11-11 13:00:00+00:00"
+  },
+  "USDJPY:2026-11-11T15:00:00+00:00": {
+   "hit": "sl",
+   "price": 159.15911732899113,
+   "status": "pending",
+   "ts": "2026-11-11T15:00:00+00:00",
+   "when": "2026-11-17 04:00:00+00:00"
   },
   "USDJPY:2026-11-11T16:00:00+00:00": {
    "hit": "sl",
@@ -21982,9 +22130,37 @@
    "status": "posted",
    "ts": "2026-11-13T19:30:00+00:00",
    "when": "2026-11-13 21:30:00+00:00"
+  },
+  "XAUUSD:2026-11-17T00:00:00+00:00": {
+   "hit": "sl",
+   "price": 3866.3831773642905,
+   "status": "posted",
+   "ts": "2026-11-17T00:00:00+00:00",
+   "when": "2026-11-17 01:30:00+00:00"
+  },
+  "XAUUSD:2026-11-17T00:30:00+00:00": {
+   "hit": "sl",
+   "price": 3866.1401825525554,
+   "status": "posted",
+   "ts": "2026-11-17T00:30:00+00:00",
+   "when": "2026-11-17 01:30:00+00:00"
+  },
+  "XAUUSD:2026-11-17T07:40:00+00:00": {
+   "hit": "tp",
+   "price": 3863.7000000000003,
+   "status": "posted",
+   "ts": "2026-11-17T07:40:00+00:00",
+   "when": "2026-11-17 08:10:00+00:00"
+  },
+  "XAUUSD:2026-11-17T07:45:00+00:00": {
+   "hit": "tp",
+   "price": 3868.3850000000007,
+   "status": "posted",
+   "ts": "2026-11-17T07:45:00+00:00",
+   "when": "2026-11-17 08:00:00+00:00"
   }
  },
  "profile": "balanced",
- "ref_seq": 1008,
+ "ref_seq": 1016,
  "zones": []
 }
