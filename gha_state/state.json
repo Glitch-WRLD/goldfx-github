@@ -63,6 +63,7 @@
   "AUDUSD:2026-11-17T21:00:00+00:00",
   "AUDUSD:2026-11-17T22:00:00+00:00",
   "AUDUSD:2026-11-18T03:00:00+00:00",
+  "AUDUSD:2026-11-19T17:00:00+00:00",
   "DJ30:2026-09-29T02:00:00+00:00",
   "DJ30:2026-09-29T15:00:00+00:00",
   "DJ30:2026-09-30T15:00:00+00:00",
@@ -262,6 +263,8 @@
   "GBPUSD:2026-11-17T21:00:00+00:00",
   "GBPUSD:2026-11-17T22:00:00+00:00",
   "GBPUSD:2026-11-18T02:00:00+00:00",
+  "GBPUSD:2026-11-19T16:00:00+00:00",
+  "GBPUSD:2026-11-19T17:00:00+00:00",
   "NASDAQ-100:2026-09-30T07:45:00+00:00",
   "NASDAQ-100:2026-09-30T09:15:00+00:00",
   "NASDAQ-100:2026-09-30T23:15:00+00:00",
@@ -488,6 +491,7 @@
   "NASDAQ-100:2026-11-17T15:30:00+00:00",
   "NASDAQ-100:2026-11-17T16:30:00+00:00",
   "NASDAQ-100:2026-11-19T07:15:00+00:00",
+  "NASDAQ-100:2026-11-19T15:30:00+00:00",
   "NZDUSD:2026-09-22T01:00:00+00:00",
   "NZDUSD:2026-09-23T01:00:00+00:00",
   "NZDUSD:2026-09-23T02:00:00+00:00",
@@ -554,6 +558,8 @@
   "NZDUSD:2026-11-16T22:00:00+00:00",
   "NZDUSD:2026-11-17T20:00:00+00:00",
   "NZDUSD:2026-11-17T21:00:00+00:00",
+  "NZDUSD:2026-11-19T16:00:00+00:00",
+  "NZDUSD:2026-11-19T17:00:00+00:00",
   "US500:2026-09-30T09:30:00+00:00",
   "US500:2026-09-30T10:00:00+00:00",
   "US500:2026-09-30T20:30:00+00:00",
@@ -761,6 +767,7 @@
   "USDCAD:2026-11-18T04:00:00+00:00",
   "USDCAD:2026-11-18T07:00:00+00:00",
   "USDCAD:2026-11-18T16:00:00+00:00",
+  "USDCAD:2026-11-19T20:00:00+00:00",
   "USDCHF:2026-09-28T04:00:00+00:00",
   "USDCHF:2026-09-28T07:00:00+00:00",
   "USDCHF:2026-09-29T03:00:00+00:00",
@@ -1097,9 +1104,122 @@
   "XAUUSD:2026-11-18T08:05:00+00:00",
   "XAUUSD:2026-11-18T11:00:00+00:00",
   "XAUUSD:2026-11-18T15:30:00+00:00",
-  "XAUUSD:2026-11-18T16:00:00+00:00"
+  "XAUUSD:2026-11-18T16:00:00+00:00",
+  "XAUUSD:2026-11-19T18:30:00+00:00"
  ],
  "history": [
+  {
+   "dir": "SHORT",
+   "entry": 27116.9,
+   "profile": "balanced",
+   "ref": 1070,
+   "rr": 1.4,
+   "sl": 27511.034956832264,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "NASDAQ-100",
+   "tf": "M15",
+   "tp": 26565.111060434836,
+   "ts": "2026-11-19T15:30:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 1.31032,
+   "profile": "balanced",
+   "ref": 1069,
+   "rr": 1.4,
+   "sl": 1.3142183865723742,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "GBPUSD",
+   "tf": "H1",
+   "tp": 1.304862258798676,
+   "ts": "2026-11-19T17:00:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 1.3113,
+   "profile": "balanced",
+   "ref": 1068,
+   "rr": 0.7,
+   "sl": 1.3148846086164028,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "GBPUSD",
+   "tf": "H1",
+   "tp": 1.3087907739685178,
+   "ts": "2026-11-19T16:00:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 0.66704,
+   "profile": "balanced",
+   "ref": 1067,
+   "rr": 0.7,
+   "sl": 0.6704763638353193,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "AUDUSD",
+   "tf": "H1",
+   "tp": 0.6646345453152764,
+   "ts": "2026-11-19T17:00:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 0.55,
+   "profile": "balanced",
+   "ref": 1066,
+   "rr": 1.05,
+   "sl": 0.5517188369181256,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "NZDUSD",
+   "tf": "H1",
+   "tp": 0.5482,
+   "ts": "2026-11-19T17:00:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 0.55014,
+   "profile": "balanced",
+   "ref": 1065,
+   "rr": 0.77,
+   "sl": 0.5526433628349045,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "NZDUSD",
+   "tf": "H1",
+   "tp": 0.5482,
+   "ts": "2026-11-19T16:00:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 3680.945,
+   "profile": "balanced",
+   "ref": 1064,
+   "rr": 1.4,
+   "sl": 3689.198093945686,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "XAUUSD",
+   "tf": "M30",
+   "tp": 3669.3906684760395,
+   "ts": "2026-11-19T18:30:00+00:00"
+  },
+  {
+   "dir": "LONG",
+   "entry": 1.43468,
+   "profile": "balanced",
+   "ref": 1063,
+   "rr": 0.7,
+   "sl": 1.4321625912592175,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "USDCAD",
+   "tf": "H1",
+   "tp": 1.4364421861185477,
+   "ts": "2026-11-19T20:00:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 50470.0,
@@ -14992,118 +15112,6 @@
    "tf": "M30",
    "tp": 4260.748806658146,
    "ts": "2026-09-25T03:00:00+00:00"
-  },
-  {
-   "dir": "SHORT",
-   "entry": 0.56588,
-   "profile": "balanced",
-   "ref": 69,
-   "rr": 1.2,
-   "sl": 0.5666053911383541,
-   "strategy_badge": "\u26a1 Momentum FVG Retest",
-   "strategy_type": "fvg_retest",
-   "symbol": "NZDUSD",
-   "tf": "H1",
-   "tp": 0.56501,
-   "ts": "2026-09-25T01:00:00+00:00"
-  },
-  {
-   "dir": "LONG",
-   "entry": 1.41468,
-   "profile": "balanced",
-   "ref": 68,
-   "rr": 0.3,
-   "sl": 1.4121933816695453,
-   "strategy_badge": "\u26a1 Momentum FVG Retest",
-   "strategy_type": "fvg_retest",
-   "symbol": "USDCAD",
-   "tf": "H1",
-   "tp": 1.415434632831318,
-   "ts": "2026-09-24T15:00:00+00:00"
-  },
-  {
-   "dir": "LONG",
-   "entry": 1.41186,
-   "profile": "balanced",
-   "ref": 67,
-   "rr": 2.37,
-   "sl": 1.4108250759222725,
-   "strategy_badge": "\u26a1 Momentum FVG Retest",
-   "strategy_type": "fvg_retest",
-   "symbol": "USDCAD",
-   "tf": "H1",
-   "tp": 1.4143168937088184,
-   "ts": "2026-09-24T12:00:00+00:00"
-  },
-  {
-   "dir": "SHORT",
-   "entry": 1.3225,
-   "profile": "balanced",
-   "ref": 66,
-   "rr": 1.14,
-   "sl": 1.3234339950053429,
-   "strategy_badge": "\u26a1 Momentum FVG Retest",
-   "strategy_type": "fvg_retest",
-   "symbol": "GBPUSD",
-   "tf": "H1",
-   "tp": 1.32143820349626,
-   "ts": "2026-09-24T11:00:00+00:00"
-  },
-  {
-   "dir": "SHORT",
-   "entry": 0.70307,
-   "profile": "balanced",
-   "ref": 65,
-   "rr": 2.14,
-   "sl": 0.7035555938668555,
-   "strategy_badge": "\u26a1 Momentum FVG Retest",
-   "strategy_type": "fvg_retest",
-   "symbol": "AUDUSD",
-   "tf": "H1",
-   "tp": 0.7020301685864022,
-   "ts": "2026-09-24T10:00:00+00:00"
-  },
-  {
-   "dir": "SHORT",
-   "entry": 4252.2,
-   "profile": "balanced",
-   "ref": 64,
-   "rr": 2.77,
-   "sl": 4263.616264839303,
-   "strategy_badge": "\u26a1 Momentum FVG Retest",
-   "strategy_type": "fvg_retest",
-   "symbol": "XAUUSD",
-   "tf": "M30",
-   "tp": 4220.605229224975,
-   "ts": "2026-09-24T10:00:00+00:00"
-  },
-  {
-   "dir": "SHORT",
-   "entry": 4255.72,
-   "profile": "balanced",
-   "ref": 63,
-   "rr": 1.4,
-   "sl": 4278.907642949724,
-   "strategy_badge": "\u26a1 Momentum FVG Retest",
-   "strategy_type": "fvg_retest",
-   "symbol": "XAUUSD",
-   "tf": "M30",
-   "tp": 4223.257299870387,
-   "ts": "2026-09-24T09:00:00+00:00"
-  },
-  {
-   "dir": "SHORT",
-   "entry": 4282.98,
-   "profile": "balanced",
-   "ref": 62,
-   "rr": 1.48,
-   "sl": 4292.309867889869,
-   "strategy_badge": "\u26a1 Momentum FVG Retest",
-   "strategy_type": "fvg_retest",
-   "symbol": "XAUUSD",
-   "tf": "M30",
-   "tp": 4269.207092477092,
-   "ts": "2026-09-24T07:30:00+00:00"
   }
  ],
  "offset": 821843586,
@@ -16144,6 +16152,13 @@
    "ts": "2026-11-18T04:00:00+00:00",
    "when": "2026-11-18 08:00:00+00:00"
   },
+  "DJ30:2026-11-19T09:00:00+00:00": {
+   "hit": "tp",
+   "price": 50242.794194258764,
+   "status": "posted",
+   "ts": "2026-11-19T09:00:00+00:00",
+   "when": "2026-11-19 14:00:00+00:00"
+  },
   "EURUSD:2026-09-14T02:00:00+00:00": {
    "hit": "tp",
    "price": 1.15692,
@@ -16934,6 +16949,13 @@
    "status": "posted",
    "ts": "2026-11-18T02:00:00+00:00",
    "when": "2026-11-18 07:00:00+00:00"
+  },
+  "GBPUSD:2026-11-19T16:00:00+00:00": {
+   "hit": "tp",
+   "price": 1.3087907739685178,
+   "status": "posted",
+   "ts": "2026-11-19T16:00:00+00:00",
+   "when": "2026-11-19 21:00:00+00:00"
   },
   "NASDAQ-100:2026-09-30T07:45:00+00:00": {
    "hit": "sl",
@@ -18517,6 +18539,13 @@
    "ts": "2026-11-19T07:15:00+00:00",
    "when": "2026-11-19 10:15:00+00:00"
   },
+  "NASDAQ-100:2026-11-19T15:30:00+00:00": {
+   "hit": "tp",
+   "price": 26565.111060434836,
+   "status": "posted",
+   "ts": "2026-11-19T15:30:00+00:00",
+   "when": "2026-11-19 20:00:00+00:00"
+  },
   "NZDUSD:2026-09-22T01:00:00+00:00": {
    "hit": "sl",
    "price": 0.5716449434306773,
@@ -18978,6 +19007,20 @@
    "status": "posted",
    "ts": "2026-11-17T21:00:00+00:00",
    "when": "2026-11-17 22:00:00+00:00"
+  },
+  "NZDUSD:2026-11-19T16:00:00+00:00": {
+   "hit": "tp",
+   "price": 0.5482,
+   "status": "posted",
+   "ts": "2026-11-19T16:00:00+00:00",
+   "when": "2026-11-19 21:00:00+00:00"
+  },
+  "NZDUSD:2026-11-19T17:00:00+00:00": {
+   "hit": "tp",
+   "price": 0.5482,
+   "status": "posted",
+   "ts": "2026-11-19T17:00:00+00:00",
+   "when": "2026-11-19 21:00:00+00:00"
   },
   "US500:2026-09-30T09:30:00+00:00": {
    "hit": "tp",
@@ -19846,6 +19889,13 @@
    "status": "posted",
    "ts": "2026-11-18T20:00:00+00:00",
    "when": "2026-11-18 23:00:00+00:00"
+  },
+  "US500:2026-11-19T07:30:00+00:00": {
+   "hit": "sl",
+   "price": 7378.9178798154935,
+   "status": "posted",
+   "ts": "2026-11-19T07:30:00+00:00",
+   "when": "2026-11-19 14:30:00+00:00"
   },
   "USDCAD:2026-09-22T12:00:00+00:00": {
    "hit": "tp",
@@ -21113,6 +21163,13 @@
    "status": "posted",
    "ts": "2026-11-18T00:00:00+00:00",
    "when": "2026-11-18 02:00:00+00:00"
+  },
+  "USDJPY:2026-11-19T12:00:00+00:00": {
+   "hit": "sl",
+   "price": 159.76918809329624,
+   "status": "posted",
+   "ts": "2026-11-19T12:00:00+00:00",
+   "when": "2026-11-19 15:00:00+00:00"
   },
   "XAUUSD:2026-09-14T01:00:00+00:00": {
    "hit": "sl",
@@ -22765,9 +22822,16 @@
    "status": "posted",
    "ts": "2026-11-18T16:00:00+00:00",
    "when": "2026-11-19 02:30:00+00:00"
+  },
+  "XAUUSD:2026-11-19T18:30:00+00:00": {
+   "hit": "tp",
+   "price": 3669.3906684760395,
+   "status": "posted",
+   "ts": "2026-11-19T18:30:00+00:00",
+   "when": "2026-11-19 19:30:00+00:00"
   }
  },
  "profile": "balanced",
- "ref_seq": 1062,
+ "ref_seq": 1070,
  "zones": []
 }
