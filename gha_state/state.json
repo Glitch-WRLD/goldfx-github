@@ -154,6 +154,9 @@
   "DJ30:2026-11-19T09:00:00+00:00",
   "DJ30:2026-11-19T16:00:00+00:00",
   "DJ30:2026-11-19T17:00:00+00:00",
+  "DJ30:2026-11-19T18:00:00+00:00",
+  "DJ30:2026-11-19T23:00:00+00:00",
+  "DJ30:2026-11-20T01:00:00+00:00",
   "EURUSD:2026-09-14T02:00:00+00:00",
   "EURUSD:2026-09-14T03:00:00+00:00",
   "EURUSD:2026-09-14T04:00:00+00:00",
@@ -1140,6 +1143,48 @@
   "XAUUSD:2026-11-20T18:00:00+00:00"
  ],
  "history": [
+  {
+   "dir": "SHORT",
+   "entry": 49052.5,
+   "profile": "balanced",
+   "ref": 1105,
+   "rr": 0.7,
+   "sl": 49264.594239132166,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "DJ30",
+   "tf": "H1",
+   "tp": 48904.03403260748,
+   "ts": "2026-11-20T01:00:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 49076.0,
+   "profile": "balanced",
+   "ref": 1104,
+   "rr": 1.4,
+   "sl": 49135.091839466884,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "DJ30",
+   "tf": "H1",
+   "tp": 48993.27142474636,
+   "ts": "2026-11-19T23:00:00+00:00"
+  },
+  {
+   "dir": "SHORT",
+   "entry": 49351.4,
+   "profile": "balanced",
+   "ref": 1103,
+   "rr": 0.77,
+   "sl": 49702.33623531668,
+   "strategy_badge": "\u26a1 Momentum FVG Retest",
+   "strategy_type": "fvg_retest",
+   "symbol": "DJ30",
+   "tf": "H1",
+   "tp": 49082.8,
+   "ts": "2026-11-19T18:00:00+00:00"
+  },
   {
    "dir": "SHORT",
    "entry": 6941.4,
@@ -15102,48 +15147,6 @@
    "tf": "H1",
    "tp": 0.56442,
    "ts": "2026-09-29T06:00:00+00:00"
-  },
-  {
-   "dir": "SHORT",
-   "entry": 1.32385,
-   "profile": "balanced",
-   "ref": 104,
-   "rr": 2.37,
-   "sl": 1.3251088089579353,
-   "strategy_badge": "\u26a1 Momentum FVG Retest",
-   "strategy_type": "fvg_retest",
-   "symbol": "GBPUSD",
-   "tf": "H1",
-   "tp": 1.3208636674588905,
-   "ts": "2026-09-29T05:00:00+00:00"
-  },
-  {
-   "dir": "LONG",
-   "entry": 1.41874,
-   "profile": "balanced",
-   "ref": 103,
-   "rr": 1.99,
-   "sl": 1.4176044540554205,
-   "strategy_badge": "\u26a1 Momentum FVG Retest",
-   "strategy_type": "fvg_retest",
-   "symbol": "USDCAD",
-   "tf": "H1",
-   "tp": 1.4210017643224113,
-   "ts": "2026-09-29T05:00:00+00:00"
-  },
-  {
-   "dir": "SHORT",
-   "entry": 1.324,
-   "profile": "balanced",
-   "ref": 102,
-   "rr": 2.09,
-   "sl": 1.325609486570084,
-   "strategy_badge": "\u26a1 Momentum FVG Retest",
-   "strategy_type": "fvg_retest",
-   "symbol": "GBPUSD",
-   "tf": "H1",
-   "tp": 1.320642718801882,
-   "ts": "2026-09-29T04:00:00+00:00"
   }
  ],
  "offset": 821843586,
@@ -16208,16 +16211,37 @@
   "DJ30:2026-11-19T16:00:00+00:00": {
    "hit": "tp",
    "price": 48029.55302975801,
-   "status": "pending",
+   "status": "posted",
    "ts": "2026-11-19T16:00:00+00:00",
    "when": "2026-11-20 20:00:00+00:00"
   },
   "DJ30:2026-11-19T17:00:00+00:00": {
    "hit": "tp",
    "price": 48243.874599061,
-   "status": "pending",
+   "status": "posted",
    "ts": "2026-11-19T17:00:00+00:00",
    "when": "2026-11-20 20:00:00+00:00"
+  },
+  "DJ30:2026-11-19T18:00:00+00:00": {
+   "hit": "tp",
+   "price": 49082.8,
+   "status": "posted",
+   "ts": "2026-11-19T18:00:00+00:00",
+   "when": "2026-11-19 21:00:00+00:00"
+  },
+  "DJ30:2026-11-19T23:00:00+00:00": {
+   "hit": "tp",
+   "price": 48993.27142474636,
+   "status": "posted",
+   "ts": "2026-11-19T23:00:00+00:00",
+   "when": "2026-11-20 00:00:00+00:00"
+  },
+  "DJ30:2026-11-20T01:00:00+00:00": {
+   "hit": "sl",
+   "price": 49264.594239132166,
+   "status": "posted",
+   "ts": "2026-11-20T01:00:00+00:00",
+   "when": "2026-11-20 10:00:00+00:00"
   },
   "EURUSD:2026-09-14T02:00:00+00:00": {
    "hit": "tp",
@@ -19820,7 +19844,7 @@
   "US500:2026-11-05T15:30:00+00:00": {
    "hit": "tp",
    "price": 7099.486018590754,
-   "status": "pending",
+   "status": "posted",
    "ts": "2026-11-05T15:30:00+00:00",
    "when": "2026-11-20 13:30:00+00:00"
   },
@@ -23088,6 +23112,6 @@
   }
  },
  "profile": "balanced",
- "ref_seq": 1102,
+ "ref_seq": 1105,
  "zones": []
 }
